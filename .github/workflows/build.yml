@@ -24,7 +24,7 @@ jobs:
           gradle-version: "8.8"
 
       - name: Build
-        run: gradle build --no-daemon
+        run: gradle build --no-daemon --stacktrace --info
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
