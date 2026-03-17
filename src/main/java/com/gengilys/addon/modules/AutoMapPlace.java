@@ -135,20 +135,42 @@ public class AutoMapPlace extends Module {
         return false;
     }
 
-    private boolean placeMap(MinecraftClient mc, ItemFrameEntity frame, long currentTick) {
-        ChunkPos frameChunk = new ChunkPos(frame.getBlockPos());
-        if (!isChunkAllowed(frameChunk)) return false;
+private boolean placeMap(MinecraftClient mc, ItemFrameEntity frame, long currentTick) {
+    ChunkPos frameChunk = new ChunkPos(frame.getBlockPos());
+    if (!isChunkAllowed(frameChunk)) return false;
 
-        int mapSlot = findMapSlot(mc);
-        if (mapSlot < 0) return false;
+    int mapSlot = findMapSlot(mc);
+    if (mapSlot < 0) return false;
 
-        int originalSlot = mc.player.getInventory().getSelectedSlot();
-        if (mapSlot < 9) mc.player.getInventory().setSelectedSlot(mapSlot);
+    // Only place if frame is within actual reach distance (4.5 blocks)
+    double dist = mc.player.distanceTo(frame);
+    if (dist > 4.5) return false;
 
-        EntityHitResult hit = new EntityHitResult(frame);
-        ActionResult result = mc.interactionManager.interactEntityAtLocation(
-            mc.player, frame, hit, Hand.MAIN_HAND);
+    // Rotate player to look at the frame before placing
+    Vec3d framePos = frame.getPos().add(0, frame.getHeight() / 2, 0);
+    Vec3d playerEye = mc.player.getEyePos();
+    Vec3d diff = framePos.subtract(playerEye);
+    double yaw = Math.toDegrees(Math.atan2(-diff.x, diff.z));
+    double pitch = Math.toDegrees(-Math.atan2(diff.y, Math.sqrt(diff.x * diff.x + diff.z * diff.z)));
+    mc.player.setYaw((float) yaw);
+    mc.player.setPitch((float) pitch);
 
+    int originalSlot = mc.player.getInventory().getSelectedSlot();
+    if (mapSlot < 9) mc.player.getInventory().setSelectedSlot(mapSlot);
+
+    EntityHitResult hit = new EntityHitResult(frame);
+    ActionResult result = mc.interactionManager.interactEntityAtLocation(
+        mc.player, frame, hit, Hand.MAIN_HAND);
+
+    mc.player.getInventory().setSelectedSlot(originalSlot);
+
+    if (result.isAccepted()) {
+        recordPlacement(frameChunk, currentTick);
+        lastPlacedTick = currentTick;
+        return true;
+    }
+    return false;
+}    
 mc.player.getInventory().setSelectedSlot(originalSlot);
 
         if (result.isAccepted()) {
