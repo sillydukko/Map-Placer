@@ -1,5 +1,5 @@
 [versions]
-loom          = "1.9-SNAPSHOT"
+loom = "1.10-SNAPSHOT"
 minecraft     = "1.21.8"
 yarn          = "1.21.8+build.1"
 fabric-loader = "0.18.4"
