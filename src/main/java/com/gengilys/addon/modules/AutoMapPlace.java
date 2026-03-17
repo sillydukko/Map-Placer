@@ -1,8 +1,10 @@
 package com.gengilys.addon.modules;
 
-import meteordevelopment.meteor.systems.modules.Module;
-import meteordevelopment.meteor.systems.modules.Categories;
-import meteordevelopment.meteor.settings.*;
+import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Categories;
+import meteordevelopment.meteorclient.settings.*;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.game.TickEvent;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.Entity;
@@ -78,7 +80,7 @@ public class AutoMapPlace extends Module {
     }
 
     @EventHandler
-    private void onEntitySpawn(meteordevelopment.meteor.events.packets.PacketEvent.Receive event) {
+    private void onEntitySpawn(PacketEvent.Receive event) {
         if (!isActive() || !autoPlace.get()) return;
         if (event.packet instanceof EntitySpawnS2CPacket pkt) {
             if (pkt.getEntityType() == EntityType.ITEM_FRAME
@@ -89,7 +91,7 @@ public class AutoMapPlace extends Module {
     }
 
     @EventHandler
-    private void onTick(meteordevelopment.meteor.events.game.TickEvent event) {
+    private void onTick(TickEvent.Post event) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (!isActive() || !autoPlace.get()) return;
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
@@ -115,11 +117,8 @@ public class AutoMapPlace extends Module {
 
     private boolean tryPlaceOnFrame(MinecraftClient mc, ItemFrameEntity frame, long currentTick) {
         ItemStack held = frame.getHeldItemStack();
-        boolean isEmpty = held.isEmpty();
-        boolean isFilled = !isEmpty && held.getItem() instanceof FilledMapItem;
-
-        if (isEmpty) return placeMap(mc, frame, currentTick);
-        if (isFilled && stackFrames.get()) {
+        if (held.isEmpty()) return placeMap(mc, frame, currentTick);
+        if (held.getItem() instanceof FilledMapItem && stackFrames.get()) {
             mc.interactionManager.attackEntity(mc.player, frame);
             return true;
         }
@@ -128,7 +127,7 @@ public class AutoMapPlace extends Module {
 
     private boolean placeMap(MinecraftClient mc, ItemFrameEntity frame, long currentTick) {
         ChunkPos frameChunk = new ChunkPos(frame.getBlockPos());
-        if (!isChunkAllowed(frameChunk, currentTick)) return false;
+        if (!isChunkAllowed(frameChunk)) return false;
 
         int mapSlot = findMapSlot(mc);
         if (mapSlot < 0) return false;
@@ -161,7 +160,7 @@ public class AutoMapPlace extends Module {
         return -1;
     }
 
-    private boolean isChunkAllowed(ChunkPos target, long currentTick) {
+    private boolean isChunkAllowed(ChunkPos target) {
         double minDist = chunkDistance.get();
         for (long key : lastPlacementTick.keySet()) {
             ChunkPos placed = new ChunkPos(BlockPos.fromLong(key));
