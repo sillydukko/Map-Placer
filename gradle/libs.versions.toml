@@ -1,10 +1,10 @@
 [versions]
 loom          = "1.9-SNAPSHOT"
-minecraft     = "1.21.1"
-yarn          = "1.21.1+build.3"
-fabric-loader = "0.16.9"
-fabric-api    = "0.108.0+1.21.1"
-meteor        = "0.5.9-SNAPSHOT"
+minecraft     = "1.21.8"
+yarn          = "1.21.8+build.1"
+fabric-loader = "0.18.4"
+fabric-api    = "0.136.1+1.21.8"
+meteor        = "1.21.8-SNAPSHOT"
 
 [libraries]
 minecraft     = { module = "com.mojang:minecraft",                  version.ref = "minecraft"     }
