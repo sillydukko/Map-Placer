@@ -18,11 +18,14 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Make gradlew executable
-        run: chmod +x gradlew
+      - name: Download Gradle 8.8
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.8-bin.zip
+          unzip -q gradle-8.8-bin.zip
+          echo "$PWD/gradle-8.8/bin" >> $GITHUB_PATH
 
       - name: Build
-        run: ./gradlew build --no-daemon --stacktrace
+        run: gradle build --no-daemon --stacktrace
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
