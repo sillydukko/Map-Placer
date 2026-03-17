@@ -8,7 +8,7 @@
   "license": "GPL-3.0",
   "environment": "client",
   "entrypoints": {
-    "client": ["com.gengilys.addon.MapAutoPlaceAddon"]
+    "meteor": ["com.gengilys.addon.MapAutoPlaceAddon"]
   },
   "depends": {
     "fabricloader": ">=0.15.0",
