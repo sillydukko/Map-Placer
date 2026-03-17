@@ -4,7 +4,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
-import meteordevelopment.meteorclient.events.game.TickEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.Entity;
@@ -91,7 +91,7 @@ public class AutoMapPlace extends Module {
     }
 
     @EventHandler
-    private void onTick(TickEvent.Post event) {
+    private void onTick(TickEvent.Pre event) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (!isActive() || !autoPlace.get()) return;
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
