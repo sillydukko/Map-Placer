@@ -54,9 +54,19 @@ public class AutoMapPlace extends Module {
             .sliderMax(16.0)
             .build()
     );
+    
+    private final Setting<Integer> placementDelay = sgGeneral.add(
+    new IntSetting.Builder()
+        .name("placement-delay")
+        .description("Ticks between each map placement. Higher = slower.")
+        .defaultValue(40)
+        .min(1)
+        .sliderMax(1000)
+        .build()
+    );
 
     private static final double SCAN_RANGE = 32.0;
-    private static final int PLACEMENT_COOLDOWN_TICKS = 10;
+
 
     private final Queue<Integer> pendingFrames = new ArrayDeque<>();
     private final Map<Long, Long> lastPlacementTick = new HashMap<>();
@@ -97,7 +107,7 @@ public class AutoMapPlace extends Module {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
         long currentTick = mc.world.getTime();
-        if (currentTick - lastPlacedTick < PLACEMENT_COOLDOWN_TICKS) return;
+        if (currentTick - lastPlacedTick < placementDelay.get()) return;
 
         while (!pendingFrames.isEmpty()) {
             int id = pendingFrames.poll();
