@@ -54,35 +54,34 @@ public class AutoMapPlace extends Module {
             .sliderMax(16.0)
             .build()
     );
-    
+
     private final Setting<Integer> placementDelay = sgGeneral.add(
-    new IntSetting.Builder()
-        .name("placement-delay")
-        .description("Ticks between each map placement. Higher = slower.")
-        .defaultValue(40)
-        .min(1)
-        .sliderMax(1000)
-        .build()
+        new IntSetting.Builder()
+            .name("placement-delay")
+            .description("Ticks between each map placement. 20 ticks = 1 second.")
+            .defaultValue(40)
+            .min(5)
+            .sliderMax(100)
+            .build()
     );
 
     private final Setting<Boolean> randomDelay = sgGeneral.add(
-    new BoolSetting.Builder()
-        .name("random-delay")
-        .description("Randomizes placement delay slightly to look more human.")
-        .defaultValue(true)
-        .build()
+        new BoolSetting.Builder()
+            .name("random-delay")
+            .description("Randomizes placement delay slightly to look more human.")
+            .defaultValue(true)
+            .build()
     );
 
     private final Setting<Boolean> randomLook = sgGeneral.add(
-    new BoolSetting.Builder()
-        .name("random-look")
-        .description("Adds a small random offset to where the player looks at the frame.")
-        .defaultValue(true)
-        .build()
+        new BoolSetting.Builder()
+            .name("random-look")
+            .description("Adds a small random offset to where the player looks at the frame.")
+            .defaultValue(true)
+            .build()
     );
 
     private static final double SCAN_RANGE = 32.0;
-
 
     private final Queue<Integer> pendingFrames = new ArrayDeque<>();
     private final Map<Long, Long> lastPlacementTick = new HashMap<>();
@@ -123,109 +122,13 @@ public class AutoMapPlace extends Module {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
         long currentTick = mc.world.getTime();
+
         int delay = placementDelay.get();
         if (randomDelay.get()) delay += (int)(Math.random() * 20) - 10;
         if (currentTick - lastPlacedTick < Math.max(5, delay)) return;
 
-        while (!pendingFrames.isEmpty()) {
+        if (!pendingFrames.isEmpty()) {
             int id = pendingFrames.poll();
             Entity entity = mc.world.getEntityById(id);
             if (entity instanceof ItemFrameEntity frame) {
-                if (tryPlaceOnFrame(mc, frame, currentTick)) return;
-            }
-        }
-
-        Vec3d playerPos = mc.player.getPos();
-        for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof ItemFrameEntity frame)) continue;
-            if (entity.squaredDistanceTo(playerPos) > SCAN_RANGE * SCAN_RANGE) continue;
-            if (tryPlaceOnFrame(mc, frame, currentTick)) return;
-        }
-    }
-
-    private boolean tryPlaceOnFrame(MinecraftClient mc, ItemFrameEntity frame, long currentTick) {
-        ItemStack held = frame.getHeldItemStack();
-        if (held.isEmpty()) return placeMap(mc, frame, currentTick);
-        if (held.getItem() instanceof FilledMapItem && stackFrames.get()) {
-            mc.interactionManager.attackEntity(mc.player, frame);
-            return true;
-        }
-        return false;
-    }
-
-private boolean placeMap(MinecraftClient mc, ItemFrameEntity frame, long currentTick) {
-    ChunkPos frameChunk = new ChunkPos(frame.getBlockPos());
-    if (!isChunkAllowed(frameChunk)) return false;
-
-    int mapSlot = findMapSlot(mc);
-    if (mapSlot < 0) return false;
-
-    // Only place if frame is within actual reach distance (4.5 blocks)
-    double dist = mc.player.distanceTo(frame);
-    if (dist > 4.5) return false;
-
-    // Rotate player to look at the frame before placing
-    Vec3d framePos = frame.getPos().add(0, frame.getHeight() / 2, 0);
-    Vec3d playerEye = mc.player.getEyePos();
-    Vec3d diff = framePos.subtract(playerEye);
-    double yaw = Math.toDegrees(Math.atan2(-diff.x, diff.z));
-    double pitch = Math.toDegrees(-Math.atan2(diff.y, Math.sqrt(diff.x * diff.x + diff.z * diff.z)));
-    double yawOffset   = randomLook.get() ? (Math.random() * 6 - 3) : 0;
-    double pitchOffset = randomLook.get() ? (Math.random() * 4 - 2) : 0;
-    mc.player.setYaw((float) (yaw + yawOffset));
-    mc.player.setPitch((float) (pitch + pitchOffset));
-
-    int originalSlot = mc.player.getInventory().getSelectedSlot();
-    if (mapSlot < 9) mc.player.getInventory().setSelectedSlot(mapSlot);
-
-    EntityHitResult hit = new EntityHitResult(frame);
-    ActionResult result = mc.interactionManager.interactEntityAtLocation(
-        mc.player, frame, hit, Hand.MAIN_HAND);
-
-    mc.player.getInventory().setSelectedSlot(originalSlot);
-
-    if (result.isAccepted()) {
-        recordPlacement(frameChunk, currentTick);
-        lastPlacedTick = currentTick;
-        return true;
-    }
-    return false;
-}    
-mc.player.getInventory().setSelectedSlot(originalSlot);
-
-        if (result.isAccepted()) {
-            recordPlacement(frameChunk, currentTick);
-            lastPlacedTick = currentTick;
-            return true;
-        }
-        return false;
-    }
-
-    private int findMapSlot(MinecraftClient mc) {
-        var inventory = mc.player.getInventory();
-        for (int i = 0; i < inventory.size(); i++) {
-            if (inventory.getStack(i).getItem() == Items.MAP) return i;
-        }
-        for (int i = 0; i < inventory.size(); i++) {
-            if (inventory.getStack(i).getItem() == Items.FILLED_MAP) return i;
-        }
-        return -1;
-    }
-
-    private boolean isChunkAllowed(ChunkPos target) {
-        double minDist = chunkDistance.get();
-        for (long key : lastPlacementTick.keySet()) {
-            ChunkPos placed = new ChunkPos(BlockPos.fromLong(key));
-            double dx = target.x - placed.x;
-            double dz = target.z - placed.z;
-            if (Math.sqrt(dx * dx + dz * dz) < minDist) return false;
-        }
-        return true;
-    }
-
-    private void recordPlacement(ChunkPos chunk, long tick) {
-        long key = BlockPos.asLong(chunk.x, 0, chunk.z);
-        lastPlacementTick.put(key, tick);
-        lastPlacementTick.entrySet().removeIf(e -> tick - e.getValue() > 6000L);
-    }
-}
+                tryPlac
