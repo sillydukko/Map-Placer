@@ -132,14 +132,14 @@ public class AutoMapPlace extends Module {
         int mapSlot = findMapSlot(mc);
         if (mapSlot < 0) return false;
 
-        int originalSlot = mc.player.getInventory().selectedSlot;
-        if (mapSlot < 9) mc.player.getInventory().selectedSlot = mapSlot;
+        int originalSlot = mc.player.getInventory().getSelectedSlot();
+        if (mapSlot < 9) mc.player.getInventory().setSelectedSlot(mapSlot);
 
         EntityHitResult hit = new EntityHitResult(frame);
         ActionResult result = mc.interactionManager.interactEntityAtLocation(
             mc.player, frame, hit, Hand.MAIN_HAND);
 
-        mc.player.getInventory().selectedSlot = originalSlot;
+mc.player.getInventory().setSelectedSlot(originalSlot);
 
         if (result.isAccepted()) {
             recordPlacement(frameChunk, currentTick);
