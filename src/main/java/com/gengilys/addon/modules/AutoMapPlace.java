@@ -266,9 +266,9 @@ public class AutoMapPlace extends Module {
     }
 
     /** Find first inventory slot containing either of the given items. */
-    private int findItemSlot(MinecraftClient mc, Items... items) {
+    private int findItemSlot(MinecraftClient mc, net.minecraft.item.Item... items) {
         var inventory = mc.player.getInventory();
-        for (Items item : items) {
+        for (net.minecraft.item.Item item : items) {
             for (int i = 0; i < inventory.size(); i++) {
                 if (inventory.getStack(i).getItem() == item) return i;
             }
