@@ -158,26 +158,24 @@ public class AutoMapPlace extends Module {
         player.setYaw((float)(yaw + yawOff));
         player.setPitch((float)(pitch + pitchOff));
 
-        if (silentSwap.get()) {
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
-        } else {
-            player.getInventory().setSelectedSlot(mapSlot);
-        }
+        // Always do both client + server slot swap so server definitely sees the map
+        player.getInventory().setSelectedSlot(mapSlot);
+        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
 
-        // Send interact packet directly — bypasses ViaFabricPlus interactEntity issues
+        // Small swing to confirm item in hand to server
+        player.swingHand(Hand.MAIN_HAND);
+
+        // Send interact packet
         mc.getNetworkHandler().sendPacket(
             net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket.interact(
                 frame, false, Hand.MAIN_HAND));
-        info("Sent interact packet for frame " + frame.getId());
+        info("Sent interact packet for frame " + frame.getId() + " with slot " + mapSlot);
 
+        // Restore
         player.setYaw(realYaw);
         player.setPitch(realPitch);
-        if (silentSwap.get()) {
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(realSlot));
-        } else {
-            player.getInventory().setSelectedSlot(realSlot);
-        }
-    }
+        player.getInventory().setSelectedSlot(realSlot);
+        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(realSlot));
 
 private int findMapInHotbar(MinecraftClient mc) {
         var inv = mc.player.getInventory();
