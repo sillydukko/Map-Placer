@@ -6,10 +6,11 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.item.FilledMapItem;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.util.ActionResult;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.client.MinecraftClient;
@@ -82,7 +83,6 @@ public class AutoMapPlace extends Module {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
-        // --- Process pending frame ---
         if (pendingFrameId >= 0) {
             if (delayTicks-- > 0) return;
 
@@ -92,21 +92,21 @@ public class AutoMapPlace extends Module {
             processedFrames.add(id);
 
             if (!(entity instanceof ItemFrameEntity frame)) {
-                info("Frame " + id + " not found or wrong type.");
+                info("Frame " + id + " not found.");
                 return;
             }
             if (!frame.getHeldItemStack().isEmpty()) {
-                info("Frame " + id + " already filled, skipping.");
+                info("Frame " + id + " already filled.");
                 return;
             }
             if (mc.player.distanceTo(frame) > 5.0) {
-                info("Frame " + id + " too far (" + String.format("%.1f", mc.player.distanceTo(frame)) + " blocks).");
+                info("Frame " + id + " too far: " + String.format("%.1f", mc.player.distanceTo(frame)) + " blocks.");
                 return;
             }
 
             int mapSlot = findMapInHotbar(mc);
             if (mapSlot < 0) {
-                info("No map found in hotbar!");
+                info("No map in hotbar!");
                 return;
             }
 
@@ -115,7 +115,6 @@ public class AutoMapPlace extends Module {
             return;
         }
 
-        // --- Scan for new empty frames nearby ---
         Vec3d playerPos = mc.player.getPos();
         for (Entity entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemFrameEntity frame)) continue;
@@ -155,29 +154,30 @@ public class AutoMapPlace extends Module {
         float realPitch = player.getPitch();
         int   realSlot  = player.getInventory().getSelectedSlot();
 
+        // Silent rotate
         player.setYaw((float)(yaw + yawOff));
         player.setPitch((float)(pitch + pitchOff));
 
-        // Always do both client + server slot swap so server definitely sees the map
+        // Swap slot both client and server side
         player.getInventory().setSelectedSlot(mapSlot);
         mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
 
-        // Small swing to confirm item in hand to server
+        // Swing hand so server registers item
         player.swingHand(Hand.MAIN_HAND);
 
-        // Send interact packet
+        // Send raw interact packet
         mc.getNetworkHandler().sendPacket(
-            net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket.interact(
-                frame, false, Hand.MAIN_HAND));
-        info("Sent interact packet for frame " + frame.getId() + " with slot " + mapSlot);
+            PlayerInteractEntityC2SPacket.interact(frame, false, Hand.MAIN_HAND));
+        info("Sent interact packet for frame " + frame.getId() + " slot " + mapSlot);
 
-        // Restore
+        // Restore real state
         player.setYaw(realYaw);
         player.setPitch(realPitch);
         player.getInventory().setSelectedSlot(realSlot);
         mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(realSlot));
+    }
 
-private int findMapInHotbar(MinecraftClient mc) {
+    private int findMapInHotbar(MinecraftClient mc) {
         var inv = mc.player.getInventory();
         for (int i = 0; i < 9; i++) {
             if (inv.getStack(i).getItem() == Items.MAP) return i;
