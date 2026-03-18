@@ -164,8 +164,11 @@ public class AutoMapPlace extends Module {
             player.getInventory().setSelectedSlot(mapSlot);
         }
 
-        ActionResult result = mc.interactionManager.interactEntity(player, frame, Hand.MAIN_HAND);
-        info("interactEntity result: " + result);
+        // Send interact packet directly — bypasses ViaFabricPlus interactEntity issues
+        mc.getNetworkHandler().sendPacket(
+            net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket.interact(
+                frame, false, Hand.MAIN_HAND));
+        info("Sent interact packet for frame " + frame.getId());
 
         player.setYaw(realYaw);
         player.setPitch(realPitch);
