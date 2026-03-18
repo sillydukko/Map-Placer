@@ -163,7 +163,6 @@ private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
 
     // Simulate actual right-click key press for one tick
     mc.options.useKey.setPressed(true);
-    mc.handleInputEvents();
     mc.options.useKey.setPressed(false);
 
     info("Simulated right-click on frame " + frame.getId() + " slot " + mapSlot);
