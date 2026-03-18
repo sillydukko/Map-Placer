@@ -175,7 +175,14 @@ public class AutoMapPlace extends Module {
         }
     }
 
-    private int findMapInHotbar(MinecraftClient mc) {
+private int findMapInHotbar(MinecraftClient mc) {
         var inv = mc.player.getInventory();
         for (int i = 0; i < 9; i++) {
             if (inv.getStack(i).getItem() == Items.MAP) return i;
+        }
+        for (int i = 0; i < 9; i++) {
+            if (inv.getStack(i).getItem() instanceof FilledMapItem) return i;
+        }
+        return -1;
+    }
+}
