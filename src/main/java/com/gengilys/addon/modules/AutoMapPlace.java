@@ -141,6 +141,11 @@ public class AutoMapPlace extends Module {
 private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
     ClientPlayerEntity player = mc.player;
 
+    int realSlot = player.getInventory().getSelectedSlot();
+    float realYaw = player.getYaw();
+    float realPitch = player.getPitch();
+
+    // Aim at frame
     Vec3d target = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
     Vec3d eye = player.getEyePos();
     Vec3d diff = target.subtract(eye);
@@ -149,24 +154,19 @@ private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
         Math.sqrt(diff.x * diff.x + diff.z * diff.z)));
     double yawOff   = randomLook.get() ? (Math.random() * 4 - 2)   : 0;
     double pitchOff = randomLook.get() ? (Math.random() * 3 - 1.5) : 0;
-
-    float realYaw   = player.getYaw();
-    float realPitch = player.getPitch();
-    int   realSlot  = player.getInventory().getSelectedSlot();
-
     player.setYaw((float)(yaw + yawOff));
     player.setPitch((float)(pitch + pitchOff));
 
-    // Full visible swap — most reliable approach
+    // Swap to map slot
     player.getInventory().setSelectedSlot(mapSlot);
     mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
 
-    // Try interact at location with frame center as hit pos
-    mc.interactionManager.interactEntityAtLocation(
-        player, frame,
-        new net.minecraft.util.hit.EntityHitResult(frame, target),
-        Hand.MAIN_HAND);
-    info("interactEntityAtLocation called for frame " + frame.getId() + " slot " + mapSlot);
+    // Simulate actual right-click key press for one tick
+    mc.options.useKey.setPressed(true);
+    mc.handleInputEvents();
+    mc.options.useKey.setPressed(false);
+
+    info("Simulated right-click on frame " + frame.getId() + " slot " + mapSlot);
 
     // Restore
     player.setYaw(realYaw);
