@@ -186,6 +186,7 @@ public class AutoMapPlace extends Module {
 
         silentSwap(mc, mapSlot, () -> {
             mc.interactionManager.interactEntity(mc.player, frame, Hand.MAIN_HAND);
+            mc.player.swingHand(Hand.MAIN_HAND);
         });
 
         recordPlacement(frameChunk, currentTick);
@@ -265,17 +266,22 @@ public class AutoMapPlace extends Module {
         mc.player.getInventory().setSelectedSlot(original);
     }
 
-    /** Find first inventory slot containing either of the given items. */
     private int findItemSlot(MinecraftClient mc, net.minecraft.item.Item... items) {
         var inventory = mc.player.getInventory();
+        // Check hotbar first (slots 0-8)
         for (net.minecraft.item.Item item : items) {
-            for (int i = 0; i < inventory.size(); i++) {
+            for (int i = 0; i < 9; i++) {
+                if (inventory.getStack(i).getItem() == item) return i;
+            }
+        }
+        // Then check rest of inventory
+        for (net.minecraft.item.Item item : items) {
+            for (int i = 9; i < inventory.size(); i++) {
                 if (inventory.getStack(i).getItem() == item) return i;
             }
         }
         return -1;
     }
-
     private boolean isChunkAllowed(ChunkPos target) {
         double minDist = chunkDistance.get();
         for (long key : lastPlacementTick.keySet()) {
