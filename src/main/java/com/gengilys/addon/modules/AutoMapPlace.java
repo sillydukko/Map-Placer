@@ -161,9 +161,12 @@ private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
     player.getInventory().setSelectedSlot(mapSlot);
     mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
 
-    // Use interactionManager directly with the correct hand item
-    mc.interactionManager.interactEntity(player, frame, Hand.MAIN_HAND);
-    info("interactEntity called for frame " + frame.getId() + " slot " + mapSlot);
+    // Try interact at location with frame center as hit pos
+    mc.interactionManager.interactEntityAtLocation(
+        player, frame,
+        new net.minecraft.util.hit.EntityHitResult(frame, target),
+        Hand.MAIN_HAND);
+    info("interactEntityAtLocation called for frame " + frame.getId() + " slot " + mapSlot);
 
     // Restore
     player.setYaw(realYaw);
