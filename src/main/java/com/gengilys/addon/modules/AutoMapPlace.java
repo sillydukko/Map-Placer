@@ -49,14 +49,12 @@ public class AutoMapPlace extends Module {
     private final Setting<Boolean> silentSwap = sgGeneral.add(
         new BoolSetting.Builder()
             .name("silent-swap")
-            .description("Swaps slot via packet — server sees the right item, hotbar doesn't move.")
+            .description("Swaps slot via packet rather than visually.")
             .defaultValue(true)
             .build()
     );
 
-    // Frames we've already filled or queued — don't re-process
     private final Set<Integer> processedFrames = new HashSet<>();
-    // Frame queued for placement
     private int pendingFrameId = -1;
     private int delayTicks = 0;
 
@@ -70,6 +68,7 @@ public class AutoMapPlace extends Module {
         processedFrames.clear();
         pendingFrameId = -1;
         delayTicks = 0;
+        info("AutoMapPlace activated.");
     }
 
     @Override
@@ -89,13 +88,29 @@ public class AutoMapPlace extends Module {
             Entity entity = mc.world.getEntityById(pendingFrameId);
             int id = pendingFrameId;
             pendingFrameId = -1;
-
-            if (entity instanceof ItemFrameEntity frame
-                    && frame.getHeldItemStack().isEmpty()
-                    && mc.player.distanceTo(frame) <= 5.0) {
-                placeMap(mc, frame);
-            }
             processedFrames.add(id);
+
+            if (!(entity instanceof ItemFrameEntity frame)) {
+                info("Frame " + id + " not found or wrong type.");
+                return;
+            }
+            if (!frame.getHeldItemStack().isEmpty()) {
+                info("Frame " + id + " already filled, skipping.");
+                return;
+            }
+            if (mc.player.distanceTo(frame) > 5.0) {
+                info("Frame " + id + " too far (" + String.format("%.1f", mc.player.distanceTo(frame)) + " blocks).");
+                return;
+            }
+
+            int mapSlot = findMapInHotbar(mc);
+            if (mapSlot < 0) {
+                info("No map found in hotbar!");
+                return;
+            }
+
+            info("Placing map on frame " + id + " from slot " + mapSlot);
+            placeMap(mc, frame, mapSlot);
             return;
         }
 
@@ -105,13 +120,13 @@ public class AutoMapPlace extends Module {
             if (!(entity instanceof ItemFrameEntity frame)) continue;
             if (processedFrames.contains(frame.getId())) continue;
             if (!frame.getHeldItemStack().isEmpty()) {
-                // Frame already has something — mark as done
                 processedFrames.add(frame.getId());
                 continue;
             }
-            if (entity.squaredDistanceTo(playerPos) > 6.0 * 6.0) continue;
+            double dist = Math.sqrt(entity.squaredDistanceTo(playerPos));
+            if (dist > 6.0) continue;
 
-            // Found a new empty nearby frame — queue it
+            info("Found empty frame " + frame.getId() + " at " + String.format("%.1f", dist) + " blocks, queuing...");
             pendingFrameId = frame.getId();
             int base = placementDelay.get();
             delayTicks = randomDelay.get()
@@ -120,17 +135,12 @@ public class AutoMapPlace extends Module {
             return;
         }
 
-        // Clean up processed frames that are no longer loaded
         processedFrames.removeIf(id -> mc.world.getEntityById(id) == null);
     }
 
-    private void placeMap(MinecraftClient mc, ItemFrameEntity frame) {
-        int mapSlot = findMapInHotbar(mc);
-        if (mapSlot < 0) return;
-
+    private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
         ClientPlayerEntity player = mc.player;
 
-        // Calculate silent look angles
         Vec3d target = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
         Vec3d eye = player.getEyePos();
         Vec3d diff = target.subtract(eye);
@@ -140,26 +150,22 @@ public class AutoMapPlace extends Module {
         double yawOff   = randomLook.get() ? (Math.random() * 4 - 2)   : 0;
         double pitchOff = randomLook.get() ? (Math.random() * 3 - 1.5) : 0;
 
-        // Save real state
         float realYaw   = player.getYaw();
         float realPitch = player.getPitch();
         int   realSlot  = player.getInventory().getSelectedSlot();
 
-        // Apply fake rotation (client only)
         player.setYaw((float)(yaw + yawOff));
         player.setPitch((float)(pitch + pitchOff));
 
-        // Swap slot
         if (silentSwap.get()) {
             mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
         } else {
             player.getInventory().setSelectedSlot(mapSlot);
         }
 
-        // Interact
-        mc.interactionManager.interactEntity(player, frame, Hand.MAIN_HAND);
+        ActionResult result = mc.interactionManager.interactEntity(player, frame, Hand.MAIN_HAND);
+        info("interactEntity result: " + result);
 
-        // Restore real state
         player.setYaw(realYaw);
         player.setPitch(realPitch);
         if (silentSwap.get()) {
@@ -173,10 +179,3 @@ public class AutoMapPlace extends Module {
         var inv = mc.player.getInventory();
         for (int i = 0; i < 9; i++) {
             if (inv.getStack(i).getItem() == Items.MAP) return i;
-        }
-        for (int i = 0; i < 9; i++) {
-            if (inv.getStack(i).getItem() instanceof FilledMapItem) return i;
-        }
-        return -1;
-    }
-}
