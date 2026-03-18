@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "map-auto-place",
   "version": "${version}",
-  "name": "MapAutoPlace",
+  "name": "dukkos map placer",
   "description": "Auto-places maps on empty item frames near you.",
-  "authors": ["gengilys"],
+  "authors": ["dukko"],
   "license": "GPL-3.0",
   "environment": "client",
   "entrypoints": {
