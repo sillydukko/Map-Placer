@@ -12,6 +12,7 @@ import net.minecraft.item.FilledMapItem;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.client.MinecraftClient;
@@ -24,17 +25,17 @@ public class AutoMapPlace extends Module {
     private final Setting<Integer> placementDelay = sgGeneral.add(
         new IntSetting.Builder()
             .name("placement-delay")
-            .description("Ticks to wait before placing a map on a new frame. 20 = 1 second.")
-            .defaultValue(3)
+            .description("Ticks to wait before placing. Increase for strict servers. 20 = 1s.")
+            .defaultValue(10)
             .min(1)
-            .sliderMax(40)
+            .sliderMax(60)
             .build()
     );
 
     private final Setting<Boolean> randomDelay = sgGeneral.add(
         new BoolSetting.Builder()
             .name("random-delay")
-            .description("Adds a small random extra delay before placing to look human.")
+            .description("Randomizes delay slightly to avoid pattern detection.")
             .defaultValue(true)
             .build()
     );
@@ -42,7 +43,15 @@ public class AutoMapPlace extends Module {
     private final Setting<Boolean> randomLook = sgGeneral.add(
         new BoolSetting.Builder()
             .name("random-look")
-            .description("Adds a small random offset to the silent look direction.")
+            .description("Adds slight random offset to look direction.")
+            .defaultValue(true)
+            .build()
+    );
+
+    private final Setting<Boolean> silentSwap = sgGeneral.add(
+        new BoolSetting.Builder()
+            .name("silent-swap")
+            .description("Swap slot silently via packet instead of visually.")
             .defaultValue(true)
             .build()
     );
@@ -52,7 +61,7 @@ public class AutoMapPlace extends Module {
 
     public AutoMapPlace() {
         super(Categories.Player, "auto-map-place",
-            "When you place an item frame, automatically places a map on it silently.");
+            "When you place an item frame, silently places a map on it.");
     }
 
     @Override
@@ -74,9 +83,14 @@ public class AutoMapPlace extends Module {
             Vec3d spawnPos = new Vec3d(pkt.getX(), pkt.getY(), pkt.getZ());
             if (mc.player.getPos().distanceTo(spawnPos) > 6.0) return;
 
+            // Don't overwrite a pending frame — queue it only if we're free
+            if (pendingFrameId >= 0) return;
+
             pendingFrameId = pkt.getEntityId();
             int base = placementDelay.get();
-            delayTicks = randomDelay.get() ? base + (int)(Math.random() * 4) : base;
+            delayTicks = randomDelay.get()
+                ? base + (int)(Math.random() * (base / 2 + 1))
+                : base;
         }
     }
 
@@ -98,9 +112,11 @@ public class AutoMapPlace extends Module {
         int mapSlot = findMapInHotbar(mc);
         if (mapSlot < 0) return;
 
-        // Calculate look direction toward the frame
+        ClientPlayerEntity player = mc.player;
+
+        // Calculate look angles toward frame
         Vec3d target = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
-        Vec3d eye = mc.player.getEyePos();
+        Vec3d eye = player.getEyePos();
         Vec3d diff = target.subtract(eye);
         double yaw   = Math.toDegrees(Math.atan2(-diff.x, diff.z));
         double pitch = Math.toDegrees(-Math.atan2(diff.y,
@@ -110,34 +126,43 @@ public class AutoMapPlace extends Module {
         float fakeYaw   = (float)(yaw + yawOff);
         float fakePitch = (float)(pitch + pitchOff);
 
-        ClientPlayerEntity player = mc.player;
-        int original = player.getInventory().getSelectedSlot();
-
-        // Save real rotation
+        // Save real state
         float realYaw   = player.getYaw();
         float realPitch = player.getPitch();
+        int   realSlot  = player.getInventory().getSelectedSlot();
 
-        // Silently rotate, interact, then restore — player visually never moves
+        // Apply fake state client-side only
         player.setYaw(fakeYaw);
         player.setPitch(fakePitch);
-        player.getInventory().setSelectedSlot(mapSlot);
 
+        if (silentSwap.get()) {
+            // Send slot change packet without changing visual hotbar
+            mc.getNetworkHandler().sendPacket(
+                new UpdateSelectedSlotC2SPacket(mapSlot));
+        } else {
+            player.getInventory().setSelectedSlot(mapSlot);
+        }
+
+        // Send interact packet
         mc.interactionManager.interactEntity(player, frame, Hand.MAIN_HAND);
 
-        // Restore everything immediately
+        // Restore real state immediately
         player.setYaw(realYaw);
         player.setPitch(realPitch);
-        player.getInventory().setSelectedSlot(original);
+
+        if (silentSwap.get()) {
+            mc.getNetworkHandler().sendPacket(
+                new UpdateSelectedSlotC2SPacket(realSlot));
+        } else {
+            player.getInventory().setSelectedSlot(realSlot);
+        }
     }
 
-    /** Find first hotbar slot (0-8) with a blank or filled map. */
     private int findMapInHotbar(MinecraftClient mc) {
         var inv = mc.player.getInventory();
-        // Prefer blank maps first
         for (int i = 0; i < 9; i++) {
             if (inv.getStack(i).getItem() == Items.MAP) return i;
         }
-        // Fall back to any filled map
         for (int i = 0; i < 9; i++) {
             if (inv.getStack(i).getItem() instanceof FilledMapItem) return i;
         }
