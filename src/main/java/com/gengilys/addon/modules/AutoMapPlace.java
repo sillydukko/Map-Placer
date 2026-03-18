@@ -138,44 +138,39 @@ public class AutoMapPlace extends Module {
         processedFrames.removeIf(id -> mc.world.getEntityById(id) == null);
     }
 
-    private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
-        ClientPlayerEntity player = mc.player;
+private void placeMap(MinecraftClient mc, ItemFrameEntity frame, int mapSlot) {
+    ClientPlayerEntity player = mc.player;
 
-        Vec3d target = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
-        Vec3d eye = player.getEyePos();
-        Vec3d diff = target.subtract(eye);
-        double yaw   = Math.toDegrees(Math.atan2(-diff.x, diff.z));
-        double pitch = Math.toDegrees(-Math.atan2(diff.y,
-            Math.sqrt(diff.x * diff.x + diff.z * diff.z)));
-        double yawOff   = randomLook.get() ? (Math.random() * 4 - 2)   : 0;
-        double pitchOff = randomLook.get() ? (Math.random() * 3 - 1.5) : 0;
+    Vec3d target = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
+    Vec3d eye = player.getEyePos();
+    Vec3d diff = target.subtract(eye);
+    double yaw   = Math.toDegrees(Math.atan2(-diff.x, diff.z));
+    double pitch = Math.toDegrees(-Math.atan2(diff.y,
+        Math.sqrt(diff.x * diff.x + diff.z * diff.z)));
+    double yawOff   = randomLook.get() ? (Math.random() * 4 - 2)   : 0;
+    double pitchOff = randomLook.get() ? (Math.random() * 3 - 1.5) : 0;
 
-        float realYaw   = player.getYaw();
-        float realPitch = player.getPitch();
-        int   realSlot  = player.getInventory().getSelectedSlot();
+    float realYaw   = player.getYaw();
+    float realPitch = player.getPitch();
+    int   realSlot  = player.getInventory().getSelectedSlot();
 
-        // Silent rotate
-        player.setYaw((float)(yaw + yawOff));
-        player.setPitch((float)(pitch + pitchOff));
+    player.setYaw((float)(yaw + yawOff));
+    player.setPitch((float)(pitch + pitchOff));
 
-        // Swap slot both client and server side
-        player.getInventory().setSelectedSlot(mapSlot);
-        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
+    // Full visible swap — most reliable approach
+    player.getInventory().setSelectedSlot(mapSlot);
+    mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
 
-        // Swing hand so server registers item
-        player.swingHand(Hand.MAIN_HAND);
+    // Use interactionManager directly with the correct hand item
+    mc.interactionManager.interactEntity(player, frame, Hand.MAIN_HAND);
+    info("interactEntity called for frame " + frame.getId() + " slot " + mapSlot);
 
-        // Send raw interact packet
-        mc.getNetworkHandler().sendPacket(
-            PlayerInteractEntityC2SPacket.interact(frame, false, Hand.MAIN_HAND));
-        info("Sent interact packet for frame " + frame.getId() + " slot " + mapSlot);
-
-        // Restore real state
-        player.setYaw(realYaw);
-        player.setPitch(realPitch);
-        player.getInventory().setSelectedSlot(realSlot);
-        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(realSlot));
-    }
+    // Restore
+    player.setYaw(realYaw);
+    player.setPitch(realPitch);
+    player.getInventory().setSelectedSlot(realSlot);
+    mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(realSlot));
+}
 
     private int findMapInHotbar(MinecraftClient mc) {
         var inv = mc.player.getInventory();
