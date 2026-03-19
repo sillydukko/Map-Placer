@@ -7,7 +7,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
 
 import java.util.List;
 
@@ -36,26 +35,20 @@ public class MapAdSpam extends Module {
 
     private final Setting<MoveMode> moveMode = sgMovement.add(new EnumSetting.Builder<MoveMode>()
         .name("move-mode")
-        .description("Baritone: wanders around. Sneak: bobs in place. Spin: just rotates.")
+        .description("Sneak: bobs in place. Spin: rotates. Walk: walks in random directions.")
         .defaultValue(MoveMode.Sneak).build());
 
-    private final Setting<Double> wanderRadius = sgMovement.add(new DoubleSetting.Builder()
-        .name("wander-radius").description("How far Baritone wanders from your starting position.")
-        .defaultValue(10.0).min(3.0).max(50.0).sliderMin(3.0).sliderMax(30.0)
-        .visible(() -> moveMode.get() == MoveMode.Baritone).build());
-
     private final Setting<Integer> wanderInterval = sgMovement.add(new IntSetting.Builder()
-        .name("wander-interval-seconds").description("How often Baritone picks a new random destination.")
+        .name("wander-interval-seconds").description("How often to pick a new walk direction.")
         .defaultValue(15).min(5).max(60).sliderMin(5).sliderMax(60)
-        .visible(() -> moveMode.get() == MoveMode.Baritone).build());
+        .visible(() -> moveMode.get() == MoveMode.Walk).build());
 
-    public enum MoveMode { Baritone, Sneak, Spin }
+    public enum MoveMode { Walk, Sneak, Spin }
 
     private int msgIndex  = 0;
     private int msgTimer  = 0;
     private int moveTick  = 0;
     private boolean sneakOn = false;
-    private Vec3d origin  = null;
 
     public MapAdSpam() {
         super(MapAutoPlaceAddon.CATEGORY, "map-ad-spam",
@@ -65,12 +58,11 @@ public class MapAdSpam extends Module {
     @Override
     public void onActivate() {
         if (mc.player == null) return;
-        msgTimer  = 20;
-        moveTick  = 0;
-        sneakOn   = false;
-        origin    = mc.player.getPos();
+        msgTimer = 20;
+        moveTick = 0;
+        sneakOn  = false;
         if (!randomOrder.get()) msgIndex = 0;
-        if (moveMode.get() == MoveMode.Baritone) wander();
+        if (moveMode.get() == MoveMode.Walk) wander();
     }
 
     @Override
@@ -79,7 +71,7 @@ public class MapAdSpam extends Module {
             mc.options.sneakKey.setPressed(false);
             sneakOn = false;
         }
-        if (moveMode.get() == MoveMode.Baritone) stopBaritone();
+        if (mc.options != null) mc.options.forwardKey.setPressed(false);
     }
 
     @EventHandler
@@ -88,7 +80,7 @@ public class MapAdSpam extends Module {
         moveTick++;
 
         switch (moveMode.get()) {
-            case Baritone -> {
+            case Walk  -> {
                 int wanderTicks = wanderInterval.get() * 20;
                 if (moveTick % wanderTicks == 0) wander();
             }
@@ -116,23 +108,10 @@ public class MapAdSpam extends Module {
     }
 
     private void wander() {
-        if (mc.player == null || origin == null) return;
-        try {
-            double angle = Math.random() * Math.PI * 2;
-            double r = wanderRadius.get();
-            int tx = (int)(origin.x + Math.cos(angle) * r);
-            int tz = (int)(origin.z + Math.sin(angle) * r);
-            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().setGoalAndPath(
-                    new baritone.api.pathing.goals.GoalXZ(tx, tz));
-        } catch (Exception ignored) {}
-    }
-
-    private void stopBaritone() {
-        try {
-            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().onLostControl();
-        } catch (Exception ignored) {}
+        if (mc.player == null) return;
+        float yaw = (float)(Math.random() * 360);
+        mc.player.setYaw(yaw);
+        mc.options.forwardKey.setPressed(true);
     }
 
     private void doSneak() {
