@@ -9,6 +9,11 @@ public class MapAutoPlaceAddon extends MeteorAddon {
     public static final Category CATEGORY = new Category("MapAutoPlace");
 
     @Override
+    public String getPackage() {
+        return "com.gengilys.addon";
+    }
+
+    @Override
     public void onInitialize() {
         Modules.get().add(new AutoMapPlace());
         Modules.get().add(new MapAdBot());
