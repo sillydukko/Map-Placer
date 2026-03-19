@@ -29,11 +29,11 @@ public class MapAdBot extends Module {
         .defaultValue(4.0).min(1.0).max(6.0).sliderMin(1.0).sliderMax(6.0).build());
 
     private final Setting<Double> wanderRadius = sgWander.add(new DoubleSetting.Builder()
-        .name("radius").description("How far from 0,0 to wander.")
+        .name("radius").description("How far to wander.")
         .defaultValue(50.0).min(10.0).max(500.0).sliderMin(10.0).sliderMax(200.0).build());
 
     private final Setting<Integer> newGoalInterval = sgWander.add(new IntSetting.Builder()
-        .name("new-goal-seconds").description("Seconds before picking a new destination.")
+        .name("new-goal-seconds").description("Seconds before picking a new direction.")
         .defaultValue(20).min(5).max(120).sliderMin(5).sliderMax(60).build());
 
     private int placeTick  = 0;
@@ -46,12 +46,15 @@ public class MapAdBot extends Module {
 
     @Override
     public void onActivate() {
-        placeTick = 0; wanderTick = 0;
+        placeTick = 0;
+        wanderTick = 0;
         newWanderGoal();
     }
 
     @Override
-    public void onDeactivate() { stopBaritone(); }
+    public void onDeactivate() {
+        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -61,16 +64,17 @@ public class MapAdBot extends Module {
         else if (tryPlaceFrame()) placeTick = placeDelay.get();
 
         wanderTick++;
-        boolean notPathing = false;
-        try {
-            notPathing = !baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getPathingBehavior().isPathing();
-        } catch (Exception ignored) {}
-
-        if (notPathing || wanderTick >= newGoalInterval.get() * 20) {
+        if (wanderTick >= newGoalInterval.get() * 20) {
             wanderTick = 0;
             newWanderGoal();
         }
+    }
+
+    private void newWanderGoal() {
+        if (mc.player == null) return;
+        float yaw = (float)(Math.random() * 360);
+        mc.player.setYaw(yaw);
+        mc.options.forwardKey.setPressed(true);
     }
 
     private boolean tryPlaceFrame() {
@@ -135,24 +139,5 @@ public class MapAdBot extends Module {
         for (int i = 0; i < 9; i++)
             if (mc.player.getInventory().getStack(i).getItem() == item) return i;
         return -1;
-    }
-
-    private void newWanderGoal() {
-        try {
-            double angle = Math.random() * Math.PI * 2;
-            double r = wanderRadius.get();
-            int tx = (int)(Math.cos(angle) * r);
-            int tz = (int)(Math.sin(angle) * r);
-            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().setGoalAndPath(
-                    new baritone.api.pathing.goals.GoalXZ(tx, tz));
-        } catch (Exception ignored) {}
-    }
-
-    private void stopBaritone() {
-        try {
-            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().onLostControl();
-        } catch (Exception ignored) {}
     }
 }
