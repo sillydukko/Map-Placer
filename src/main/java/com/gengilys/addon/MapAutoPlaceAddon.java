@@ -2,12 +2,12 @@ package com.gengilys.addon;
 
 import com.gengilys.addon.modules.*;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
-import meteordevelopment.meteorclient.systems.modules.Categories;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.item.Items;
 
 public class MapAutoPlaceAddon extends MeteorAddon {
-    public static final Category CATEGORY = Categories.MISC;
+    public static final Category CATEGORY = new Category("MapAutoPlace", Items.FILLED_MAP.getDefaultStack());
 
     @Override
     public String getPackage() {
