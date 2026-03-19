@@ -4,126 +4,134 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+
+import java.util.List;
 
 import static com.gengilys.addon.MapAutoPlaceAddon.CATEGORY;
 
-/**
- * MapAdBot — wanders around and automatically places item frames on walls/surfaces.
- * Use together with AutoMapPlace to fill frames with maps.
- */
-public class MapAdBot extends Module {
+public class MapAdSpam extends Module {
 
-    private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgWander  = settings.createGroup("Wander");
+    private final SettingGroup sgMessages = settings.createGroup("Messages");
+    private final SettingGroup sgMovement = settings.createGroup("Movement");
 
-    private final Setting<Double> placeDelay = sgGeneral.add(new DoubleSetting.Builder()
-        .name("place-delay-seconds")
-        .description("Seconds to wait between frame placements.")
-        .defaultValue(4.0).min(1.0).max(6.0).sliderMin(1.0).sliderMax(6.0).build());
+    private final Setting<List<String>> messages = sgMessages.add(new StringListSetting.Builder()
+        .name("messages")
+        .description("Messages to send in chat.")
+        .defaultValue(List.of("Check out my map art! /warp maps"))
+        .build());
 
-    private final Setting<Double> wanderRadius = sgWander.add(new DoubleSetting.Builder()
-        .name("radius")
-        .description("How far to walk before picking a new random direction.")
-        .defaultValue(50.0).min(10.0).max(500.0).sliderMin(10.0).sliderMax(200.0).build());
+    private final Setting<Integer> msgInterval = sgMessages.add(new IntSetting.Builder()
+        .name("interval-seconds")
+        .description("Seconds between each message.")
+        .defaultValue(30).min(5).max(300).sliderMin(10).sliderMax(120)
+        .build());
 
-    private final Setting<Integer> newGoalInterval = sgWander.add(new IntSetting.Builder()
-        .name("new-goal-seconds")
-        .description("Seconds before picking a new direction.")
-        .defaultValue(20).min(5).max(120).sliderMin(5).sliderMax(60).build());
+    private final Setting<Boolean> randomOrder = sgMessages.add(new BoolSetting.Builder()
+        .name("random-order").description("Send messages in random order.").defaultValue(false).build());
 
-    private int placeTick  = 0;
-    private int wanderTick = 0;
-    // Track distance walked in current direction
-    private Vec3d startPos = null;
+    private final Setting<MoveMode> moveMode = sgMovement.add(new EnumSetting.Builder<MoveMode>()
+        .name("move-mode")
+        .description("Sneak: bobs in place. Spin: rotates silently. Walk: walks in random directions.")
+        .defaultValue(MoveMode.Sneak).build());
 
-    public MapAdBot() {
-        super(CATEGORY, "map-ad-bot",
-            "Wanders around and places item frames. Use with auto-map-place to fill them.");
+    private final Setting<Integer> wanderInterval = sgMovement.add(new IntSetting.Builder()
+        .name("wander-interval-seconds").description("How often to pick a new walk direction.")
+        .defaultValue(15).min(5).max(60).sliderMin(5).sliderMax(60)
+        .visible(() -> moveMode.get() == MoveMode.Walk).build());
+
+    public enum MoveMode { Walk, Sneak, Spin }
+
+    private int msgIndex = 0;
+    private int msgTimer = 0;
+    private boolean sneakOn = false;
+    private int walkTimer = 0;
+    private float spinYaw = 0;
+
+    public MapAdSpam() {
+        super(CATEGORY, "map-ad-spam", "Spams chat messages and keeps you moving.");
     }
 
     @Override
     public void onActivate() {
-        placeTick  = 0;
-        wanderTick = 0;
-        startPos   = mc.player != null ? mc.player.getPos() : null;
-        newWanderGoal();
+        if (mc.player == null) return;
+        msgTimer = msgInterval.get() * 20;
+        sneakOn = false;
+        walkTimer = 0;
+        spinYaw = mc.player.getYaw();
+        if (!randomOrder.get()) msgIndex = 0;
+        if (moveMode.get() == MoveMode.Walk) pickNewWalkDirection();
     }
 
     @Override
     public void onDeactivate() {
-        stopMoving();
+        stopAllKeys();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
 
-        // Handle placement cooldown
-        if (placeTick > 0) placeTick--;
-        else if (tryPlaceFrame()) placeTick = (int)(placeDelay.get() * 20);
+        // Messages
+        msgTimer--;
+        if (msgTimer <= 0) {
+            msgTimer = msgInterval.get() * 20;
+            List<String> msgs = messages.get();
+            if (!msgs.isEmpty()) {
+                String msg = randomOrder.get()
+                    ? msgs.get((int)(Math.random() * msgs.size()))
+                    : msgs.get(msgIndex++ % msgs.size());
+                mc.player.networkHandler.sendChatMessage(msg);
+            }
+        }
 
-        // Handle wander
-        wanderTick++;
-        boolean walkedFarEnough = startPos != null &&
-            mc.player.getPos().distanceTo(startPos) >= wanderRadius.get();
-
-        if (wanderTick >= newGoalInterval.get() * 20 || walkedFarEnough) {
-            wanderTick = 0;
-            newWanderGoal();
+        // Movement
+        switch (moveMode.get()) {
+            case Walk -> {
+                if (--walkTimer <= 0) pickNewWalkDirection();
+            }
+            case Sneak -> doSneak();
+            case Spin -> doSpin();
         }
     }
 
-    private void newWanderGoal() {
+    private void pickNewWalkDirection() {
         if (mc.player == null) return;
-        startPos = mc.player.getPos();
-
-        // Pick a random yaw and start walking in that direction
+        // Send silent yaw to server so movement direction changes
         float yaw = (float)(Math.random() * 360.0);
+        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
+            yaw, mc.player.getPitch(), mc.player.isOnGround(), mc.player.horizontalCollision));
+        // Also set client yaw so forwardKey actually moves in that direction
         mc.player.setYaw(yaw);
         mc.options.forwardKey.setPressed(true);
         mc.options.sneakKey.setPressed(false);
+        walkTimer = wanderInterval.get() * 20;
     }
 
-    private void stopMoving() {
+    private void doSneak() {
+        if (mc.player == null) return;
+        // Toggle sneak every 20 ticks
+        if ((int)(System.currentTimeMillis() / 50) % 20 == 0) {
+            sneakOn = !sneakOn;
+            mc.options.sneakKey.setPressed(sneakOn);
+            mc.options.forwardKey.setPressed(false);
+        }
+    }
+
+    private void doSpin() {
+        if (mc.player == null) return;
+        mc.options.forwardKey.setPressed(false);
+        mc.options.sneakKey.setPressed(false);
+        // Rotate 5 degrees per tick server-side only (silent)
+        spinYaw += 5f;
+        mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
+            spinYaw, mc.player.getPitch(), mc.player.isOnGround(), mc.player.horizontalCollision));
+    }
+
+    private void stopAllKeys() {
         if (mc.options == null) return;
         mc.options.forwardKey.setPressed(false);
         mc.options.sneakKey.setPressed(false);
-    }
-
-    /** Tries to place an item frame on the surface the player is looking at. */
-    private boolean tryPlaceFrame() {
-        if (mc.player == null || mc.crosshairTarget == null) return false;
-        if (!(mc.crosshairTarget instanceof BlockHitResult hit)) return false;
-
-        int slot = findFrameInHotbar();
-        if (slot == -1) return false;
-
-        // Switch to item frame slot
-        if (mc.player.getInventory().getSelectedSlot() != slot) {
-            mc.player.getInventory().setSelectedSlot(slot);
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
-        }
-
-        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(
-            Hand.MAIN_HAND, hit, 0));
-
-        return true;
-    }
-
-    private int findFrameInHotbar() {
-        var inv = mc.player.getInventory();
-        for (int i = 0; i < 9; i++) {
-            if (inv.getStack(i).getItem() == Items.ITEM_FRAME) return i;
-        }
-        return -1;
+        sneakOn = false;
     }
 }
