@@ -1,192 +1,182 @@
 package com.gengilys.addon.modules;
 
-import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.systems.modules.Categories;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
+import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.decoration.ItemFrameEntity;
-import net.minecraft.entity.Entity;
 import net.minecraft.item.FilledMapItem;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import java.util.HashSet;
-import java.util.Set;
+import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
+import net.minecraft.util.Hand;
+import net.minecraft.util.math.ChunkPos;
+
+import java.util.*;
+
+import static com.gengilys.addon.MapAutoPlaceAddon.CATEGORY;
 
 public class AutoMapPlace extends Module {
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
-    private final Setting<Integer> placementDelay = sgGeneral.add(
-        new IntSetting.Builder()
-            .name("placement-delay")
-            .description("Ticks to wait after detecting an empty frame. 20 = 1 second.")
-            .defaultValue(10)
-            .min(1)
-            .sliderMax(60)
-            .build()
-    );
+    private final Setting<Boolean> autoPlace = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-place")
+        .description("Automatically places maps on empty item frames near you.")
+        .defaultValue(true)
+        .build());
 
-    private final Setting<Boolean> randomDelay = sgGeneral.add(
-        new BoolSetting.Builder()
-            .name("random-delay")
-            .description("Randomizes delay slightly to avoid pattern detection.")
-            .defaultValue(true)
-            .build()
-    );
+    private final Setting<Boolean> stackFrames = sgGeneral.add(new BoolSetting.Builder()
+        .name("stack-frames")
+        .description("Break a filled frame first, then place a new map (saves item frames).")
+        .defaultValue(false)
+        .build());
 
-    private final Setting<Boolean> randomLook = sgGeneral.add(
-        new BoolSetting.Builder()
-            .name("random-look")
-            .description("Adds slight random offset to silent look direction.")
-            .defaultValue(true)
-            .build()
-    );
+    private final Setting<Double> chunkDistance = sgGeneral.add(new DoubleSetting.Builder()
+        .name("chunk-distance")
+        .description("Minimum chunk distance between placements to prevent dumping all maps at once.")
+        .defaultValue(2.0)
+        .min(0.5)
+        .max(16.0)
+        .sliderMin(0.5)
+        .sliderMax(8.0)
+        .build());
 
-    private final Set<Integer> processedFrames = new HashSet<>();
-    private int pendingFrameId = -1;
-    private int delayTicks = 0;
-
-    // State for two-tick place sequence
-    private boolean placing = false;
-    private int placingFrameId = -1;
-    private int placingMapSlot = -1;
-    private float placingYaw, placingPitch;
-    private float realYaw, realPitch;
-    private int realSlot;
+    // Frame IDs queued from spawn packets
+    private final Queue<Integer> spawnQueue = new LinkedList<>();
+    // Chunk positions we've already placed in, with timestamps
+    private final Map<Long, Long> placedChunks = new HashMap<>();
+    // How long (ms) before a chunk is forgotten from history
+    private static final long HISTORY_CLEAR_MS = 5 * 60 * 1000;
+    // Cooldown between placements (ticks)
+    private int cooldown = 0;
 
     public AutoMapPlace() {
-        super(Categories.Player, "auto-map-place",
-            "When you place an item frame, silently places a map on it.");
+        super(CATEGORY, "auto-map-place",
+            "Automatically places maps on empty item frames near you.");
     }
 
     @Override
     public void onActivate() {
-        processedFrames.clear();
-        pendingFrameId = -1;
-        delayTicks = 0;
-        placing = false;
-        info("AutoMapPlace activated.");
+        spawnQueue.clear();
+        placedChunks.clear();
+        cooldown = 0;
     }
 
     @Override
     public void onDeactivate() {
-        processedFrames.clear();
-        placing = false;
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.options != null) mc.options.useKey.setPressed(false);
+        spawnQueue.clear();
     }
 
     @EventHandler
-    private void onTick(meteordevelopment.meteorclient.events.world.TickEvent.Pre event) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
-
-        // ── Tick 2: release key and restore state ─────────────────────────
-        if (placing) {
-            placing = false;
-            mc.options.useKey.setPressed(false);
-            mc.player.setYaw(realYaw);
-            mc.player.setPitch(realPitch);
-            mc.player.getInventory().setSelectedSlot(realSlot);
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(realSlot));
-            info("Released use key, restored state.");
-            return;
-        }
-
-        // ── Process pending frame ──────────────────────────────────────────
-        if (pendingFrameId >= 0) {
-            if (delayTicks-- > 0) return;
-
-            Entity entity = mc.world.getEntityById(pendingFrameId);
-            int id = pendingFrameId;
-            pendingFrameId = -1;
-            processedFrames.add(id);
-
-            if (!(entity instanceof ItemFrameEntity frame)) {
-                info("Frame " + id + " not found.");
-                return;
-            }
-            if (!frame.getHeldItemStack().isEmpty()) {
-                info("Frame " + id + " already filled.");
-                return;
-            }
-            if (mc.player.distanceTo(frame) > 5.0) {
-                info("Frame " + id + " too far.");
-                return;
-            }
-
-            int mapSlot = findMapInHotbar(mc);
-            if (mapSlot < 0) {
-                info("No map in hotbar!");
-                return;
-            }
-
-            // Calculate look direction
-            Vec3d target = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
-            Vec3d eye = mc.player.getEyePos();
-            Vec3d diff = target.subtract(eye);
-            double yaw   = Math.toDegrees(Math.atan2(-diff.x, diff.z));
-            double pitch = Math.toDegrees(-Math.atan2(diff.y,
-                Math.sqrt(diff.x * diff.x + diff.z * diff.z)));
-            double yawOff   = randomLook.get() ? (Math.random() * 4 - 2)   : 0;
-            double pitchOff = randomLook.get() ? (Math.random() * 3 - 1.5) : 0;
-
-            // Save real state
-            realYaw   = mc.player.getYaw();
-            realPitch = mc.player.getPitch();
-            realSlot  = mc.player.getInventory().getSelectedSlot();
-            placingYaw   = (float)(yaw + yawOff);
-            placingPitch = (float)(pitch + pitchOff);
-            placingMapSlot = mapSlot;
-            placingFrameId = id;
-
-            // ── Tick 1: apply state and press use key ──────────────────────
-            mc.player.setYaw(placingYaw);
-            mc.player.setPitch(placingPitch);
-            mc.player.getInventory().setSelectedSlot(mapSlot);
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
-            mc.options.useKey.setPressed(true);
-            placing = true;
-
-            info("Tick 1: pressing use key on frame " + id + " slot " + mapSlot);
-            return;
-        }
-
-        // ── Scan for new empty frames nearby ──────────────────────────────
-        Vec3d playerPos = mc.player.getPos();
-        for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof ItemFrameEntity frame)) continue;
-            if (processedFrames.contains(frame.getId())) continue;
-            if (!frame.getHeldItemStack().isEmpty()) {
-                processedFrames.add(frame.getId());
-                continue;
-            }
-            double dist = Math.sqrt(entity.squaredDistanceTo(playerPos));
-            if (dist > 6.0) continue;
-
-            info("Found empty frame " + frame.getId() + " at " + String.format("%.1f", dist) + " blocks.");
-            pendingFrameId = frame.getId();
-            int base = placementDelay.get();
-            delayTicks = randomDelay.get()
-                ? base + (int)(Math.random() * Math.max(1, base / 2))
-                : base;
-            return;
-        }
-
-        processedFrames.removeIf(id -> mc.world.getEntityById(id) == null);
+    private void onEntitySpawn(PacketEvent.Receive event) {
+        if (!(event.packet instanceof EntitySpawnS2CPacket packet)) return;
+        if (mc.world == null) return;
+        // Queue the entity ID for processing on next tick (world may not have it yet)
+        spawnQueue.add(packet.getEntityId());
     }
 
-    private int findMapInHotbar(MinecraftClient mc) {
-        var inv = mc.player.getInventory();
-        for (int i = 0; i < 9; i++) {
-            if (inv.getStack(i).getItem() == Items.MAP) return i;
+    @EventHandler
+    private void onTick(TickEvent.Pre event) {
+        if (!autoPlace.get()) return;
+        if (mc.player == null || mc.world == null) return;
+
+        // Expire old chunk history
+        long now = System.currentTimeMillis();
+        placedChunks.entrySet().removeIf(e -> now - e.getValue() > HISTORY_CLEAR_MS);
+
+        if (cooldown > 0) {
+            cooldown--;
+            return;
         }
+
+        // Try frames from spawn queue first (freshly spawned)
+        while (!spawnQueue.isEmpty()) {
+            int id = spawnQueue.poll();
+            var entity = mc.world.getEntityById(id);
+            if (entity instanceof ItemFrameEntity frame && tryPlace(frame)) {
+                cooldown = 5;
+                return;
+            }
+        }
+
+        // Scan all item frames within 32 blocks every tick
+        for (var entity : mc.world.getEntities()) {
+            if (!(entity instanceof ItemFrameEntity frame)) continue;
+            if (frame.getPos().squaredDistanceTo(mc.player.getPos()) > 32 * 32) continue;
+            if (tryPlace(frame)) {
+                cooldown = 5;
+                return;
+            }
+        }
+    }
+
+    /**
+     * Attempts to place a map in the given frame.
+     * Returns true if a placement packet was sent.
+     */
+    private boolean tryPlace(ItemFrameEntity frame) {
+        // Check if frame already has a filled map
+        var heldItem = frame.getHeldItemStack();
+        boolean hasMap = heldItem.getItem() instanceof FilledMapItem;
+
+        if (hasMap && !stackFrames.get()) return false;
+
+        // Chunk-distance throttle
+        ChunkPos frameChunk = new ChunkPos(frame.getBlockPos());
+        ChunkPos playerChunk = new ChunkPos(mc.player.getBlockPos());
+        double dist = chunkDist(frameChunk, playerChunk);
+        if (dist < chunkDistance.get()) return false;
+
+        // Check if this chunk was placed recently
+        long chunkKey = frameChunk.toLong();
+        if (placedChunks.containsKey(chunkKey)) return false;
+
+        // Find a map in hotbar (prefer filled maps over blank ones)
+        int mapSlot = findMapSlot();
+        if (mapSlot == -1) return false;
+
+        // Switch to the map slot if needed
+        if (mc.player.getInventory().getSelectedSlot() != mapSlot) {
+            mc.player.getInventory().setSelectedSlot(mapSlot);
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(mapSlot));
+        }
+
+        // Send interact packet directly — works even when not looking at the frame
+        mc.getNetworkHandler().sendPacket(
+            PlayerInteractEntityC2SPacket.interact(frame, false, Hand.MAIN_HAND));
+
+        placedChunks.put(chunkKey, System.currentTimeMillis());
+        info("Placed map on frame " + frame.getId() + " at " + frame.getBlockPos());
+        return true;
+    }
+
+    /**
+     * Find a filled map (or blank map) in the hotbar, then in the full inventory.
+     * Returns hotbar slot 0-8, or inventory slot mapped to hotbar swap space (9-35).
+     * For simplicity, only uses hotbar here — move maps to hotbar before using.
+     */
+    private int findMapSlot() {
+        var inv = mc.player.getInventory();
+        // First pass: filled maps in hotbar
         for (int i = 0; i < 9; i++) {
             if (inv.getStack(i).getItem() instanceof FilledMapItem) return i;
         }
+        // Second pass: blank maps in hotbar (Maps that haven't been explored yet
+        // are Items.FILLED_MAP in 1.21; Items.MAP was removed — FilledMapItem covers both)
+        for (int i = 0; i < 9; i++) {
+            if (inv.getStack(i).getItem() == Items.MAP) return i;
+        }
         return -1;
+    }
+
+    private double chunkDist(ChunkPos a, ChunkPos b) {
+        int dx = a.x - b.x;
+        int dz = a.z - b.z;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 }

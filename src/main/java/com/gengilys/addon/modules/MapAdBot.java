@@ -1,70 +1,82 @@
 package com.gengilys.addon.modules;
 
-import com.gengilys.addon.MapAutoPlaceAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.*;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
-import java.util.*;
+import static com.gengilys.addon.MapAutoPlaceAddon.CATEGORY;
 
+/**
+ * MapAdBot — wanders around and automatically places item frames on walls/surfaces.
+ * Use together with AutoMapPlace to fill frames with maps.
+ */
 public class MapAdBot extends Module {
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgWander  = settings.createGroup("Wander");
 
-    private final Setting<Integer> placeDelay = sgGeneral.add(new IntSetting.Builder()
-        .name("place-delay").description("Ticks between placements.")
-        .defaultValue(3).min(1).max(20).sliderMin(1).sliderMax(20).build());
-
-    private final Setting<Double> placeRange = sgGeneral.add(new DoubleSetting.Builder()
-        .name("place-range").description("Block reach.")
+    private final Setting<Double> placeDelay = sgGeneral.add(new DoubleSetting.Builder()
+        .name("place-delay-seconds")
+        .description("Seconds to wait between frame placements.")
         .defaultValue(4.0).min(1.0).max(6.0).sliderMin(1.0).sliderMax(6.0).build());
 
     private final Setting<Double> wanderRadius = sgWander.add(new DoubleSetting.Builder()
-        .name("radius").description("How far to wander.")
+        .name("radius")
+        .description("How far to walk before picking a new random direction.")
         .defaultValue(50.0).min(10.0).max(500.0).sliderMin(10.0).sliderMax(200.0).build());
 
     private final Setting<Integer> newGoalInterval = sgWander.add(new IntSetting.Builder()
-        .name("new-goal-seconds").description("Seconds before picking a new direction.")
+        .name("new-goal-seconds")
+        .description("Seconds before picking a new direction.")
         .defaultValue(20).min(5).max(120).sliderMin(5).sliderMax(60).build());
 
     private int placeTick  = 0;
     private int wanderTick = 0;
+    // Track distance walked in current direction
+    private Vec3d startPos = null;
 
     public MapAdBot() {
-        super(MapAutoPlaceAddon.CATEGORY, "map-ad-bot",
-            "Wanders around and plasters item frames on every surface. Enable Map Placer to fill them.");
+        super(CATEGORY, "map-ad-bot",
+            "Wanders around and places item frames. Use with auto-map-place to fill them.");
     }
 
     @Override
     public void onActivate() {
-        placeTick = 0;
+        placeTick  = 0;
         wanderTick = 0;
+        startPos   = mc.player != null ? mc.player.getPos() : null;
         newWanderGoal();
     }
 
     @Override
     public void onDeactivate() {
-        if (mc.options != null) mc.options.forwardKey.setPressed(false);
+        stopMoving();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
+        if (mc.player == null) return;
 
+        // Handle placement cooldown
         if (placeTick > 0) placeTick--;
-        else if (tryPlaceFrame()) placeTick = placeDelay.get();
+        else if (tryPlaceFrame()) placeTick = (int)(placeDelay.get() * 20);
 
+        // Handle wander
         wanderTick++;
-        if (wanderTick >= newGoalInterval.get() * 20) {
+        boolean walkedFarEnough = startPos != null &&
+            mc.player.getPos().distanceTo(startPos) >= wanderRadius.get();
+
+        if (wanderTick >= newGoalInterval.get() * 20 || walkedFarEnough) {
             wanderTick = 0;
             newWanderGoal();
         }
@@ -72,72 +84,46 @@ public class MapAdBot extends Module {
 
     private void newWanderGoal() {
         if (mc.player == null) return;
-        float yaw = (float)(Math.random() * 360);
+        startPos = mc.player.getPos();
+
+        // Pick a random yaw and start walking in that direction
+        float yaw = (float)(Math.random() * 360.0);
         mc.player.setYaw(yaw);
         mc.options.forwardKey.setPressed(true);
+        mc.options.sneakKey.setPressed(false);
     }
 
+    private void stopMoving() {
+        if (mc.options == null) return;
+        mc.options.forwardKey.setPressed(false);
+        mc.options.sneakKey.setPressed(false);
+    }
+
+    /** Tries to place an item frame on the surface the player is looking at. */
     private boolean tryPlaceFrame() {
-        int slot = findHotbar(Items.ITEM_FRAME);
+        if (mc.player == null || mc.crosshairTarget == null) return false;
+        if (!(mc.crosshairTarget instanceof BlockHitResult hit)) return false;
+
+        int slot = findFrameInHotbar();
         if (slot == -1) return false;
 
-        Vec3d eye = mc.player.getEyePos();
-
-        for (BlockPos solid : getNearbyBlocks()) {
-            BlockState solidState = mc.world.getBlockState(solid);
-            if (solidState.isAir()) continue;
-            if (solidState.getCollisionShape(mc.world, solid).isEmpty()) continue;
-
-            for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN}) {
-                BlockPos empty = solid.offset(face);
-                BlockState emptyState = mc.world.getBlockState(empty);
-                if (!emptyState.isAir() && !emptyState.isReplaceable()) continue;
-                if (frameExistsNear(empty)) continue;
-
-                Vec3d hitVec = Vec3d.ofCenter(solid).add(
-                    face.getOffsetX() * 0.5,
-                    face.getOffsetY() * 0.5,
-                    face.getOffsetZ() * 0.5
-                );
-                if (hitVec.distanceTo(eye) > placeRange.get()) continue;
-
-                place(slot, solid, face, hitVec);
-                return true;
-            }
+        // Switch to item frame slot
+        if (mc.player.getInventory().getSelectedSlot() != slot) {
+            mc.player.getInventory().setSelectedSlot(slot);
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
         }
-        return false;
+
+        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(
+            Hand.MAIN_HAND, hit, 0));
+
+        return true;
     }
 
-    private boolean frameExistsNear(BlockPos pos) {
-        return !mc.world.getEntitiesByClass(ItemFrameEntity.class,
-            new Box(pos).expand(0.6), f -> true).isEmpty();
-    }
-
-    private List<BlockPos> getNearbyBlocks() {
-        int r = (int) Math.ceil(placeRange.get());
-        BlockPos origin = mc.player.getBlockPos();
-        List<BlockPos> list = new ArrayList<>();
-        for (int x = -r; x <= r; x++)
-            for (int y = -r; y <= r; y++)
-                for (int z = -r; z <= r; z++)
-                    list.add(origin.add(x, y, z));
-        list.sort(Comparator.comparingDouble(p ->
-            mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(p))));
-        return list;
-    }
-
-    private void place(int slot, BlockPos pos, Direction face, Vec3d hitVec) {
-        int prev = mc.player.getInventory().getSelectedSlot();
-        mc.player.getInventory().setSelectedSlot(slot);
-        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
-            new BlockHitResult(hitVec, face, pos, false));
-        mc.player.swingHand(Hand.MAIN_HAND);
-        mc.player.getInventory().setSelectedSlot(prev);
-    }
-
-    private int findHotbar(net.minecraft.item.Item item) {
-        for (int i = 0; i < 9; i++)
-            if (mc.player.getInventory().getStack(i).getItem() == item) return i;
+    private int findFrameInHotbar() {
+        var inv = mc.player.getInventory();
+        for (int i = 0; i < 9; i++) {
+            if (inv.getStack(i).getItem() == Items.ITEM_FRAME) return i;
+        }
         return -1;
     }
 }
