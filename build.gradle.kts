@@ -10,6 +10,7 @@ group   = project.property("maven_group") as String
 repositories {
     maven("https://maven.meteordev.org/snapshots")
     maven("https://maven.meteordev.org/releases")
+    maven("https://baritone.leijurv.com")
     mavenCentral()
 }
 
@@ -18,9 +19,10 @@ dependencies {
     mappings(variantOf(libs.yarn) { classifier("v2") })
     modImplementation(libs.fabric.loader)
     modImplementation(libs.fabric.api)
-
-    // Meteor – compile + runtime
     modImplementation(libs.meteor.client)
+
+    // Baritone API (compile only — provided at runtime by baritone-meteor in mods folder)
+    modCompileOnly("baritone:baritone-api-fabric:1.21.8-SNAPSHOT")
 }
 
 tasks {
@@ -34,9 +36,7 @@ tasks {
     }
 
     processResources {
-        val map = mapOf(
-            "version" to project.version
-        )
+        val map = mapOf("version" to project.version)
         inputs.properties(map)
         filesMatching("fabric.mod.json") { expand(map) }
     }
