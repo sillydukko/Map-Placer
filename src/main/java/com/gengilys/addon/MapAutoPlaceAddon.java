@@ -1,7 +1,7 @@
 package com.gengilys.addon;
 
 import com.gengilys.addon.modules.*;
-import meteordevelopment.meteor.api.MeteorAddon;
+import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 
