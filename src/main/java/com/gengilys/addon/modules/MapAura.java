@@ -1,6 +1,6 @@
-package com.gengily.map.modules;
+package com.gengilys.addon.modules;
 
-import com.gengily.map.GengilyMap;
+import com.gengilys.addon.MapAutoPlaceAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -11,9 +11,10 @@ import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.item.FilledMapItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.*;
 
 import java.util.*;
@@ -41,7 +42,7 @@ public class MapAura extends Module {
     private int tickTimer = 0;
 
     public MapAura() {
-        super(GengilyMap.CATEGORY, "map-aura",
+        super(MapAutoPlaceAddon.CATEGORY, "map-aura",
             "Places item frames and maps on every reachable block face.");
     }
 
@@ -64,20 +65,14 @@ public class MapAura extends Module {
         double r = range.get();
 
         for (BlockPos solid : getSphere()) {
-            // Must have a collision box (walls, slabs, full blocks, etc)
             BlockState solidState = mc.world.getBlockState(solid);
             if (solidState.isAir()) continue;
             if (solidState.getCollisionShape(mc.world, solid).isEmpty()) continue;
 
-            // Prefer vertical faces (wall-mounted maps) over floor/ceiling
-for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN}) {
+            for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN}) {
                 BlockPos empty = solid.offset(face);
-
-                // Space for frame must be empty
                 BlockState emptyState = mc.world.getBlockState(empty);
                 if (!emptyState.isAir() && !emptyState.isReplaceable()) continue;
-
-                // Skip if frame already exists nearby
                 if (frameExistsNear(empty)) continue;
 
                 Vec3d hitVec = Vec3d.ofCenter(solid).add(
@@ -106,14 +101,14 @@ for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Directio
             Vec3d c = frame.getPos().add(0, frame.getHeight() / 2.0, 0);
             if (c.distanceTo(eye) > range.get()) continue;
 
-            int prev = mc.player.getInventory().selectedSlot;
-            mc.player.getInventory().selectedSlot = slot;
-            var hit = new net.minecraft.util.hit.EntityHitResult(frame, c);
+            int prev = mc.player.getInventory().getSelectedSlot();
+            mc.player.getInventory().setSelectedSlot(slot);
+            var hit = new EntityHitResult(frame, c);
             var res = mc.interactionManager.interactEntityAtLocation(mc.player, frame, hit, Hand.MAIN_HAND);
-            if (res == net.minecraft.util.ActionResult.PASS)
+            if (res == ActionResult.PASS)
                 mc.interactionManager.interactEntity(mc.player, frame, Hand.MAIN_HAND);
             mc.player.swingHand(Hand.MAIN_HAND);
-            mc.player.getInventory().selectedSlot = prev;
+            mc.player.getInventory().setSelectedSlot(prev);
             return true;
         }
         return false;
@@ -138,12 +133,12 @@ for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Directio
     }
 
     private void place(int slot, BlockPos pos, Direction face, Vec3d hitVec) {
-        int prev = mc.player.getInventory().selectedSlot;
-        mc.player.getInventory().selectedSlot = slot;
+        int prev = mc.player.getInventory().getSelectedSlot();
+        mc.player.getInventory().setSelectedSlot(slot);
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
             new BlockHitResult(hitVec, face, pos, false));
         mc.player.swingHand(Hand.MAIN_HAND);
-        mc.player.getInventory().selectedSlot = prev;
+        mc.player.getInventory().setSelectedSlot(prev);
     }
 
     private int findHotbar(net.minecraft.item.Item item) {
@@ -158,17 +153,5 @@ for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Directio
             if (!s.isEmpty() && s.getItem() instanceof FilledMapItem) return i;
         }
         return -1;
-    }
-
-    private void lookAt(Vec3d target) {
-        Vec3d eye = mc.player.getEyePos();
-        Vec3d d = target.subtract(eye);
-        double h = Math.sqrt(d.x * d.x + d.z * d.z);
-        float yaw   = MathHelper.wrapDegrees((float) Math.toDegrees(Math.atan2(d.z, d.x)) - 90f);
-        float pitch = MathHelper.clamp((float) -Math.toDegrees(Math.atan2(d.y, h)), -90f, 90f);
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
-        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-            yaw, pitch, mc.player.isOnGround(), mc.player.horizontalCollision));
     }
 }

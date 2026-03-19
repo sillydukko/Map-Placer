@@ -1,6 +1,6 @@
-package com.gengily.map.modules;
+package com.gengilys.addon.modules;
 
-import com.gengily.map.GengilyMap;
+import com.gengilys.addon.MapAutoPlaceAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -17,6 +17,8 @@ import net.minecraft.item.Items;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.MapIdComponent;
 import net.minecraft.util.Hand;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
@@ -24,13 +26,11 @@ import java.util.*;
 
 public class MapPlacer extends Module {
 
-    // ── Setting groups ────────────────────────────────────────────────────
     private final SettingGroup sgGeneral   = settings.getDefaultGroup();
     private final SettingGroup sgReplace   = settings.createGroup("Replace");
     private final SettingGroup sgFilter    = settings.createGroup("Map Filter");
     private final SettingGroup sgHighlight = settings.createGroup("Highlight");
 
-    // General
     private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
         .name("delay").description("Ticks between placements.")
         .defaultValue(6).min(1).max(20).sliderMin(1).sliderMax(20).build());
@@ -47,7 +47,6 @@ public class MapPlacer extends Module {
         .name("return-to-frame-slot").description("Switch back to item frame slot after placing.")
         .defaultValue(true).build());
 
-    // Replace
     private final Setting<Boolean> replaceMode = sgReplace.add(new BoolSetting.Builder()
         .name("replace-filled-frames").description("Break filled frames and replace with your map.")
         .defaultValue(false).build());
@@ -60,9 +59,7 @@ public class MapPlacer extends Module {
 
     private final Setting<String> mapIdList = sgReplace.add(new StringSetting.Builder()
         .name("map-ids")
-        .description("Comma-separated map IDs to whitelist or blacklist. Example: 42,137,8. " +
-                     "Blacklist mode: these IDs are PROTECTED (never broken). " +
-                     "Whitelist mode: ONLY these IDs will be broken.")
+        .description("Comma-separated map IDs to whitelist or blacklist.")
         .defaultValue("")
         .visible(replaceMode::get).build());
 
@@ -72,7 +69,6 @@ public class MapPlacer extends Module {
         .defaultValue(true)
         .visible(replaceMode::get).build());
 
-    // Map Filter (which maps in your hotbar to use)
     private final Setting<FilterMode> hotbarFilterMode = sgFilter.add(new EnumSetting.Builder<FilterMode>()
         .name("hotbar-filter-mode")
         .description("Whitelist = only place these map IDs. Blacklist = skip these map IDs.")
@@ -83,7 +79,6 @@ public class MapPlacer extends Module {
         .description("Comma-separated map IDs to filter in your hotbar.")
         .defaultValue("").build());
 
-    // Highlight
     private final Setting<Boolean> highlightEnabled = sgHighlight.add(new BoolSetting.Builder()
         .name("highlight").defaultValue(true).build());
 
@@ -104,9 +99,7 @@ public class MapPlacer extends Module {
         .name("shape-mode").defaultValue(ShapeMode.Both)
         .visible(highlightEnabled::get).build());
 
-    // ── State ─────────────────────────────────────────────────────────────
     public enum FilterMode { Whitelist, Blacklist }
-
     private enum State { IDLE, WAIT_AFTER_BREAK, SWITCH_BACK }
 
     private State state = State.IDLE;
@@ -114,14 +107,11 @@ public class MapPlacer extends Module {
     private int prevSlot = -1;
     private Vec3d targetBreakPos = null;
     private final Random random = new Random();
-
-    /** Map IDs placed by us this session — never break these if protectOwn is on. */
     private final Set<Integer> ownPlacedMapIds = new HashSet<>();
-    /** Frame entity IDs we've interacted with (skip until server confirms). */
     private final Set<Integer> placedFrameIds  = new HashSet<>();
 
     public MapPlacer() {
-        super(GengilyMap.CATEGORY, "map-placer",
+        super(MapAutoPlaceAddon.CATEGORY, "map-placer",
             "Automatically places maps into nearby item frames.");
     }
 
@@ -132,13 +122,12 @@ public class MapPlacer extends Module {
         prevSlot = -1;
         targetBreakPos = null;
         placedFrameIds.clear();
-        // Don't clear ownPlacedMapIds on re-enable — keep protecting maps we placed earlier
     }
 
     @Override
     public void onDeactivate() {
         if (prevSlot != -1 && mc.player != null)
-            mc.player.getInventory().selectedSlot = prevSlot;
+            mc.player.getInventory().setSelectedSlot(prevSlot);
         prevSlot = -1;
     }
 
@@ -146,7 +135,6 @@ public class MapPlacer extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
-        // Clean up confirmed placements
         placedFrameIds.removeIf(id -> {
             for (Entity e : mc.world.getEntities())
                 if (e.getId() == id && e instanceof ItemFrameEntity f)
@@ -155,7 +143,6 @@ public class MapPlacer extends Module {
         });
 
         switch (state) {
-
             case IDLE -> {
                 waitTicks--;
                 if (waitTicks > 0) return;
@@ -166,22 +153,20 @@ public class MapPlacer extends Module {
                 ItemFrameEntity target = findTarget(mapSlot);
                 if (target == null) return;
 
-                if (faceFrame.get())
-                    lookAt(center(target));
+                if (faceFrame.get()) lookAt(center(target));
 
                 boolean filled = !target.getHeldItemStack().isEmpty();
 
                 if (replaceMode.get() && filled) {
-                    if (!shouldBreak(target)) return; // protected by filter
+                    if (!shouldBreak(target)) return;
                     mc.interactionManager.attackEntity(mc.player, target);
                     mc.player.swingHand(Hand.MAIN_HAND);
                     targetBreakPos = target.getPos();
                     state = State.WAIT_AFTER_BREAK;
                     waitTicks = 10;
                 } else if (!filled) {
-                    prevSlot = mc.player.getInventory().selectedSlot;
-                    mc.player.getInventory().selectedSlot = mapSlot;
-                    // Record what map ID we're placing
+                    prevSlot = mc.player.getInventory().getSelectedSlot();
+                    mc.player.getInventory().setSelectedSlot(mapSlot);
                     int placedId = getMapId(mc.player.getInventory().getStack(mapSlot));
                     if (placedId >= 0) ownPlacedMapIds.add(placedId);
                     doPlace(target);
@@ -204,8 +189,8 @@ public class MapPlacer extends Module {
 
                 if (faceFrame.get()) lookAt(center(newFrame));
 
-                prevSlot = mc.player.getInventory().selectedSlot;
-                mc.player.getInventory().selectedSlot = mapSlot;
+                prevSlot = mc.player.getInventory().getSelectedSlot();
+                mc.player.getInventory().setSelectedSlot(mapSlot);
                 int placedId = getMapId(mc.player.getInventory().getStack(mapSlot));
                 if (placedId >= 0) ownPlacedMapIds.add(placedId);
                 doPlace(newFrame);
@@ -219,10 +204,10 @@ public class MapPlacer extends Module {
                 if (waitTicks > 0) return;
                 if (returnToFrame.get()) {
                     int fs = findItemFrameInHotbar();
-                    mc.player.getInventory().selectedSlot =
-                        fs != -1 ? fs : (prevSlot != -1 ? prevSlot : mc.player.getInventory().selectedSlot);
+                    mc.player.getInventory().setSelectedSlot(
+                        fs != -1 ? fs : (prevSlot != -1 ? prevSlot : mc.player.getInventory().getSelectedSlot()));
                 } else if (prevSlot != -1) {
-                    mc.player.getInventory().selectedSlot = prevSlot;
+                    mc.player.getInventory().setSelectedSlot(prevSlot);
                 }
                 prevSlot = -1;
                 state = State.IDLE;
@@ -231,48 +216,30 @@ public class MapPlacer extends Module {
         }
     }
 
-    // ── Replace filter logic ───────────────────────────────────────────────
-    /**
-     * Returns true if we are allowed to break this frame's map.
-     *
-     * Blacklist mode (default — protect listed IDs):
-     *   → break anything EXCEPT IDs in the list (and own placed if protectOwn)
-     *
-     * Whitelist mode (only break listed IDs):
-     *   → only break if the map ID IS in the list
-     */
     private boolean shouldBreak(ItemFrameEntity frame) {
         ItemStack held = frame.getHeldItemStack();
-        if (!isMapItem(held)) return true; // empty or non-map, fine to break
-
+        if (!isMapItem(held)) return true;
         int mapId = getMapId(held);
-
-        // Always protect own placed maps if setting is on
         if (protectOwn.get() && mapId >= 0 && ownPlacedMapIds.contains(mapId)) return false;
-
         Set<Integer> ids = parseIds(mapIdList.get());
-
         return switch (filterMode.get()) {
-            case Blacklist -> !ids.contains(mapId); // break if NOT in blacklist
-            case Whitelist ->  ids.contains(mapId); // break ONLY if in whitelist
+            case Blacklist -> !ids.contains(mapId);
+            case Whitelist ->  ids.contains(mapId);
         };
     }
 
-    /** Returns true if this hotbar map passes the hotbar filter. */
     private boolean hotbarMapAllowed(ItemStack stack) {
         if (!isMapItem(stack)) return false;
         int mapId = getMapId(stack);
         Set<Integer> ids = parseIds(hotbarMapIds.get());
-        if (ids.isEmpty()) return true; // no filter configured — allow all
+        if (ids.isEmpty()) return true;
         return switch (hotbarFilterMode.get()) {
             case Blacklist -> !ids.contains(mapId);
             case Whitelist ->  ids.contains(mapId);
         };
     }
 
-    // ── Target finding ────────────────────────────────────────────────────
     private ItemFrameEntity findTarget(int mapSlot) {
-        ItemStack mapStack = mc.player.getInventory().getStack(mapSlot);
         Vec3d pos = mc.player.getPos();
         ItemFrameEntity bestEmpty = null, bestFilled = null;
         double distEmpty = Double.MAX_VALUE, distFilled = Double.MAX_VALUE;
@@ -306,7 +273,6 @@ public class MapPlacer extends Module {
         return result;
     }
 
-    // ── Render ────────────────────────────────────────────────────────────
     @EventHandler
     private void onRender3D(Render3DEvent event) {
         if (!highlightEnabled.get() || mc.player == null || mc.world == null) return;
@@ -316,7 +282,7 @@ public class MapPlacer extends Module {
             if (!hasMap) {
                 color = emptyColor.get();
             } else if (replaceMode.get() && !shouldBreak(frame)) {
-                color = protectedColor.get(); // protected map
+                color = protectedColor.get();
             } else {
                 color = filledColor.get();
             }
@@ -328,12 +294,11 @@ public class MapPlacer extends Module {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
     private void doPlace(ItemFrameEntity frame) {
         Vec3d c = center(frame);
-        var hit = new net.minecraft.util.hit.EntityHitResult(frame, c);
+        var hit = new EntityHitResult(frame, c);
         var result = mc.interactionManager.interactEntityAtLocation(mc.player, frame, hit, Hand.MAIN_HAND);
-        if (result == net.minecraft.util.ActionResult.PASS)
+        if (result == ActionResult.PASS)
             mc.interactionManager.interactEntity(mc.player, frame, Hand.MAIN_HAND);
         mc.player.swingHand(Hand.MAIN_HAND);
         placedFrameIds.add(frame.getId());
@@ -359,7 +324,6 @@ public class MapPlacer extends Module {
         return !stack.isEmpty() && stack.getItem() instanceof FilledMapItem;
     }
 
-    /** Returns the numeric map ID from a filled map stack, or -1. */
     private int getMapId(ItemStack stack) {
         if (!isMapItem(stack)) return -1;
         try {
@@ -370,7 +334,6 @@ public class MapPlacer extends Module {
         }
     }
 
-    /** Parse a comma-separated string of integers into a Set. */
     private Set<Integer> parseIds(String raw) {
         Set<Integer> ids = new HashSet<>();
         if (raw == null || raw.isBlank()) return ids;

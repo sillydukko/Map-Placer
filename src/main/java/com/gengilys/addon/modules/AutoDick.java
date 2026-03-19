@@ -1,6 +1,6 @@
-package com.gengily.map.modules;
+package com.gengilys.addon.modules;
 
-import com.gengily.map.GengilyMap;
+import com.gengilys.addon.MapAutoPlaceAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -23,35 +23,16 @@ public class AutoDick extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
-        .name("delay")
-        .description("Ticks between block placements.")
-        .defaultValue(2).min(0).max(10).sliderMin(0).sliderMax(10)
-        .build());
+        .name("delay").description("Ticks between block placements.")
+        .defaultValue(2).min(0).max(10).sliderMin(0).sliderMax(10).build());
 
     private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
-        .name("rotate")
-        .description("Look at block server-side before placing.")
-        .defaultValue(true)
-        .build());
+        .name("rotate").description("Look at block server-side before placing.")
+        .defaultValue(true).build());
 
-    /*
-     * Shape (relative to player feet, facing north):
-     *
-     *   .•.   y+2
-     *   .•.   y+1
-     *   •••   y+0
-     *
-     * x: -1, 0, +1
-     * Build bottom row first so we always have a surface to click.
-     */
     private static final int[][] SHAPE = {
-        // Base row (y=0)
-        {-1, 0, 0},
-        { 0, 0, 0},
-        { 1, 0, 0},
-        // Shaft (y=1, y=2) — center column only
-        { 0, 1, 0},
-        { 0, 2, 0},
+        {-1, 0, 0}, { 0, 0, 0}, { 1, 0, 0},
+        { 0, 1, 0}, { 0, 2, 0},
     };
 
     private List<BlockPos> targets = new ArrayList<>();
@@ -59,22 +40,18 @@ public class AutoDick extends Module {
     private int tickTimer = 0;
 
     public AutoDick() {
-        super(GengilyMap.CATEGORY, "auto-dick",
-            "Builds an obsidian structure in front of you. You know what it looks like.");
+        super(MapAutoPlaceAddon.CATEGORY, "auto-dick",
+            "Builds an obsidian structure in front of you.");
     }
 
     @Override
     public void onActivate() {
         if (mc.player == null) return;
-
-        // Anchor: 1 block in front of player feet
         BlockPos anchor = mc.player.getBlockPos()
             .offset(mc.player.getHorizontalFacing(), 1);
-
         targets.clear();
         for (int[] o : SHAPE)
             targets.add(anchor.add(o[0], o[1], o[2]));
-
         step = 0;
         tickTimer = 0;
     }
@@ -89,7 +66,6 @@ public class AutoDick extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
         if (step >= targets.size()) { toggle(); return; }
-
         if (tickTimer > 0) { tickTimer--; return; }
 
         int slot = findObsidian();
@@ -100,13 +76,10 @@ public class AutoDick extends Module {
         }
 
         BlockPos target = targets.get(step);
-
-        // Skip if already obsidian
         if (mc.world.getBlockState(target).getBlock() == Blocks.OBSIDIAN) {
             step++; return;
         }
 
-        // Find a solid neighbor to click against
         Direction[] order = {Direction.DOWN, Direction.NORTH, Direction.SOUTH,
                              Direction.EAST, Direction.WEST, Direction.UP};
         for (Direction face : order) {
@@ -122,19 +95,18 @@ public class AutoDick extends Module {
 
             if (rotate.get()) lookAt(hitVec);
 
-            int prev = mc.player.getInventory().selectedSlot;
-            mc.player.getInventory().selectedSlot = slot;
+            int prev = mc.player.getInventory().getSelectedSlot();
+            mc.player.getInventory().setSelectedSlot(slot);
             mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
                 new BlockHitResult(hitVec, hitFace, neighbor, false));
             mc.player.swingHand(Hand.MAIN_HAND);
-            mc.player.getInventory().selectedSlot = prev;
+            mc.player.getInventory().setSelectedSlot(prev);
 
             step++;
             tickTimer = delay.get();
             return;
         }
 
-        // No solid neighbor yet — skip for now, retry next tick
         tickTimer = 1;
     }
 

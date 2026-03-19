@@ -1,8 +1,6 @@
-package com.gengily.map.modules;
+package com.gengilys.addon.modules;
 
-import baritone.api.BaritoneAPI;
-import baritone.api.pathing.goals.GoalXZ;
-import com.gengily.map.GengilyMap;
+import com.gengilys.addon.MapAutoPlaceAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -11,7 +9,6 @@ import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.*;
@@ -43,7 +40,7 @@ public class MapAdBot extends Module {
     private int wanderTick = 0;
 
     public MapAdBot() {
-        super(GengilyMap.CATEGORY, "map-ad-bot",
+        super(MapAutoPlaceAddon.CATEGORY, "map-ad-bot",
             "Wanders around and plasters item frames on every surface. Enable Map Placer to fill them.");
     }
 
@@ -60,15 +57,13 @@ public class MapAdBot extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
-        // ── Place frames ──────────────────────────────────────────────────
         if (placeTick > 0) placeTick--;
         else if (tryPlaceFrame()) placeTick = placeDelay.get();
 
-        // ── Wander ────────────────────────────────────────────────────────
         wanderTick++;
         boolean notPathing = false;
         try {
-            notPathing = !BaritoneAPI.getProvider().getPrimaryBaritone()
+            notPathing = !baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
                 .getPathingBehavior().isPathing();
         } catch (Exception ignored) {}
 
@@ -89,8 +84,7 @@ public class MapAdBot extends Module {
             if (solidState.isAir()) continue;
             if (solidState.getCollisionShape(mc.world, solid).isEmpty()) continue;
 
-            // Prefer vertical faces (wall-mounted maps) over floor/ceiling
-for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN}) {
+            for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN}) {
                 BlockPos empty = solid.offset(face);
                 BlockState emptyState = mc.world.getBlockState(empty);
                 if (!emptyState.isAir() && !emptyState.isReplaceable()) continue;
@@ -129,12 +123,12 @@ for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Directio
     }
 
     private void place(int slot, BlockPos pos, Direction face, Vec3d hitVec) {
-        int prev = mc.player.getInventory().selectedSlot;
-        mc.player.getInventory().selectedSlot = slot;
+        int prev = mc.player.getInventory().getSelectedSlot();
+        mc.player.getInventory().setSelectedSlot(slot);
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
             new BlockHitResult(hitVec, face, pos, false));
         mc.player.swingHand(Hand.MAIN_HAND);
-        mc.player.getInventory().selectedSlot = prev;
+        mc.player.getInventory().setSelectedSlot(prev);
     }
 
     private int findHotbar(net.minecraft.item.Item item) {
@@ -143,32 +137,21 @@ for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Directio
         return -1;
     }
 
-    private void lookAt(Vec3d target) {
-        Vec3d eye = mc.player.getEyePos();
-        Vec3d d = target.subtract(eye);
-        double h = Math.sqrt(d.x * d.x + d.z * d.z);
-        float yaw   = MathHelper.wrapDegrees((float) Math.toDegrees(Math.atan2(d.z, d.x)) - 90f);
-        float pitch = MathHelper.clamp((float) -Math.toDegrees(Math.atan2(d.y, h)), -90f, 90f);
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
-        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-            yaw, pitch, mc.player.isOnGround(), mc.player.horizontalCollision));
-    }
-
     private void newWanderGoal() {
         try {
             double angle = Math.random() * Math.PI * 2;
             double r = wanderRadius.get();
             int tx = (int)(Math.cos(angle) * r);
             int tz = (int)(Math.sin(angle) * r);
-            BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().setGoalAndPath(new GoalXZ(tx, tz));
+            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
+                .getCustomGoalProcess().setGoalAndPath(
+                    new baritone.api.pathing.goals.GoalXZ(tx, tz));
         } catch (Exception ignored) {}
     }
 
     private void stopBaritone() {
         try {
-            BaritoneAPI.getProvider().getPrimaryBaritone()
+            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
                 .getCustomGoalProcess().onLostControl();
         } catch (Exception ignored) {}
     }
