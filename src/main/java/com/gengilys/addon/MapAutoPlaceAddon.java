@@ -15,8 +15,12 @@ public class MapAutoPlaceAddon extends MeteorAddon {
     }
 
     @Override
-    public void onInitialize() {
+    public void onRegisterCategories() {
         CATEGORY = new Category("MapAutoPlace", Items.FILLED_MAP.getDefaultStack());
+    }
+
+    @Override
+    public void onInitialize() {
         Modules.get().add(new AutoMapPlace());
         Modules.get().add(new MapAdBot());
         Modules.get().add(new MapAdSpam());
