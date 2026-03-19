@@ -7,7 +7,7 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.item.Items;
 
 public class MapAutoPlaceAddon extends MeteorAddon {
-    public static Category CATEGORY;
+    public static final Category CATEGORY = new Category("MapAutoPlace", Items.FILLED_MAP.getDefaultStack());
 
     @Override
     public String getPackage() {
@@ -16,7 +16,7 @@ public class MapAutoPlaceAddon extends MeteorAddon {
 
     @Override
     public void onRegisterCategories() {
-        CATEGORY = new Category("MapAutoPlace", Items.FILLED_MAP.getDefaultStack());
+        Modules.registerCategory(CATEGORY);
     }
 
     @Override
